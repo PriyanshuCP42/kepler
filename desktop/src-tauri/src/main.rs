@@ -1,4 +1,4 @@
-//! Alpha Harness on the desktop: the app in a window of its own, an icon in the tray, and the
+//! Kepler on the desktop: the app in a window of its own, an icon in the tray, and the
 //! supervisor (see [`supervisor`]) that installs, updates and runs the backend behind them.
 
 // No console window behind the app on Windows; a debug build keeps one for its output.
@@ -96,7 +96,7 @@ pub fn show(app: &AppHandle) {
 }
 
 fn tray(app: &AppHandle) -> tauri::Result<()> {
-    let open = MenuItem::with_id(app, "open", "Open Alpha Harness", true, None::<&str>)?;
+    let open = MenuItem::with_id(app, "open", "Open Kepler", true, None::<&str>)?;
     let login = CheckMenuItem::with_id(
         app,
         "login",
@@ -105,13 +105,13 @@ fn tray(app: &AppHandle) -> tauri::Result<()> {
         app.autolaunch().is_enabled().unwrap_or(false),
         None::<&str>,
     )?;
-    let quit = MenuItem::with_id(app, "quit", "Quit Alpha Harness", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit Kepler", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(app, &[&open, &login, &separator, &quit])?;
 
     let toggled = login.clone();
     let mut builder = TrayIconBuilder::with_id("main")
-        .tooltip(format!("Alpha Harness {}", supervisor::BUILD_VERSION))
+        .tooltip(format!("Kepler {}", supervisor::BUILD_VERSION))
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(move |app, event| match event.id().as_ref() {
@@ -170,7 +170,7 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Closing the window keeps Alpha Harness in the tray, so tasks keep simulating. Only
+            // Closing the window keeps Kepler in the tray, so tasks keep simulating. Only
             // the app's own: the identity check's window closes for good.
             if let WindowEvent::CloseRequested { api, .. } = event
                 && window.label() == "main"
@@ -180,7 +180,7 @@ fn main() {
             }
         })
         .build(tauri::generate_context!())
-        .expect("Alpha Harness could not open its window");
+        .expect("Kepler could not open its window");
 
     app.run(|app, event| match event {
         #[cfg(target_os = "macos")]

@@ -42,8 +42,8 @@ class UpdateStatus(Out):
     checked_at: str | None
     #: The version of the launcher that started this app, when one did.
     launcher: str | None
-    #: The release download that replaces it on this machine, e.g. ``AlphaHarness.exe`` or
-    #: ``AlphaHarness-macOS-arm64.zip``.
+    #: The release download that replaces it on this machine, e.g.
+    #: ``Kepler-windows-x64-setup.exe`` or ``Kepler-macOS-arm64.dmg``.
     launcher_file: str
     #: True when that exe is older than this release needs. An update installs the wheel and
     #: never the exe, so a launcher change reaches nobody until they download it themselves.

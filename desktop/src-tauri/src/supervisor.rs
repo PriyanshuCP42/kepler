@@ -34,7 +34,7 @@ pub const BUILD_VERSION: &str = match option_env!("ALPHA_HARNESS_VERSION") {
     Some(version) => version,
     None => "0.0.0",
 };
-const REPOSITORY: &str = "residual-lab/alpha-harness";
+const REPOSITORY: &str = "PriyanshuCP42/kepler";
 const REPOSITORY_VARIABLE: &str = "ALPHA_HARNESS_REPOSITORY";
 
 const HOME_VARIABLE: &str = "ALPHA_HARNESS_HOME";
@@ -113,7 +113,7 @@ fn xdg_data(user: &Path) -> PathBuf {
 }
 
 /// The applications menu entry the Python launcher wrote, named as this app's own: left behind,
-/// the menu shows Alpha Harness twice, and one of them opens the old launcher.
+/// the menu shows Kepler twice, and one of them opens the old launcher.
 #[cfg(target_os = "linux")]
 fn forget_old_launcher() {
     // Without a home, the entry's path would be relative to wherever this was started.
@@ -232,7 +232,7 @@ fn fail(app: &AppHandle, message: &str) {
     let log = root().join(LOG_FILE);
     app.dialog()
         .message(format!("{message}\n\nDetails: {}", log.display()))
-        .title("Alpha Harness")
+        .title("Kepler")
         .kind(MessageDialogKind::Error)
         .blocking_show();
 }
@@ -638,7 +638,7 @@ mod job {
                 return None;
             }
             let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
-            // Breakaway lets the browser the app opens for a link outlive Alpha Harness.
+            // Breakaway lets the browser the app opens for a link outlive Kepler.
             limits.BasicLimitInformation.LimitFlags =
                 JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK;
             let size = u32::try_from(size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>()).ok()?;
@@ -957,10 +957,10 @@ fn supervise(app: &AppHandle, uv: &Path) -> i32 {
             status(
                 app,
                 &if running.is_some() {
-                    format!("Updating to Alpha Harness {wanted}…")
+                    format!("Updating to Kepler {wanted}…")
                 } else {
                     format!(
-                        "Installing Alpha Harness {wanted}. The first start downloads Python and \
+                        "Installing Kepler {wanted}. The first start downloads Python and \
                          the app (about 330 MB), which takes a few minutes."
                     )
                 },
@@ -980,7 +980,7 @@ fn supervise(app: &AppHandle, uv: &Path) -> i32 {
                     let Some(running) = running.as_deref() else {
                         fail(
                             app,
-                            &format!("Could not install Alpha Harness {wanted}.\n{error}"),
+                            &format!("Could not install Kepler {wanted}.\n{error}"),
                         );
                         return 1;
                     };
@@ -1000,13 +1000,13 @@ fn supervise(app: &AppHandle, uv: &Path) -> i32 {
             fail(
                 app,
                 &format!(
-                    "Another program is using port {APP_PORT}, which Alpha Harness needs. Close \
-                     it, then open Alpha Harness again."
+                    "Another program is using port {APP_PORT}, which Kepler needs. Close \
+                     it, then open Kepler again."
                 ),
             );
             return 1;
         }
-        status(app, "Starting Alpha Harness…");
+        status(app, "Starting Kepler…");
         let code = start(app, slot);
         if QUITTING.load(Ordering::SeqCst) {
             note("closed from the tray");
@@ -1025,7 +1025,7 @@ fn supervise(app: &AppHandle, uv: &Path) -> i32 {
             note_failure(
                 &failed,
                 &format!(
-                    "It closed before it could start (exit code {code}). Alpha Harness went back \
+                    "It closed before it could start (exit code {code}). Kepler went back \
                      to {back}."
                 ),
             );
@@ -1037,7 +1037,7 @@ fn supervise(app: &AppHandle, uv: &Path) -> i32 {
                 fail(
                     app,
                     &format!(
-                        "Alpha Harness stopped unexpectedly (exit code {code}).\n\n{}",
+                        "Kepler stopped unexpectedly (exit code {code}).\n\n{}",
                         recent(8)
                     ),
                 );
@@ -1056,15 +1056,15 @@ fn run(app: &AppHandle) -> i32 {
         );
         return 1;
     }
-    note(&format!("Alpha Harness {BUILD_VERSION} (desktop)"));
+    note(&format!("Kepler {BUILD_VERSION} (desktop)"));
     if !claim() {
         let message = if SLOTS.into_iter().any(|s| slot_version(s).is_some()) {
-            "Alpha Harness is already running from its previous launcher, or an install it began is \
+            "Kepler is already running from its previous launcher, or an install it began is \
              still finishing. Quit it from its tray icon or the account menu, or wait a minute, \
-             then open Alpha Harness again."
+             then open Kepler again."
         } else {
-            "Alpha Harness is still installing from its previous launcher. Wait for it to open, \
-             quit it, then open Alpha Harness again."
+            "Kepler is still installing from its previous launcher. Wait for it to open, \
+             quit it, then open Kepler again."
         };
         fail(app, message);
         return 0;
@@ -1074,7 +1074,7 @@ fn run(app: &AppHandle) -> i32 {
     let Some(uv) = find_uv() else {
         fail(
             app,
-            "This copy of Alpha Harness is missing its bundled uv. Download it again.",
+            "This copy of Kepler is missing its bundled uv. Download it again.",
         );
         return 1;
     };

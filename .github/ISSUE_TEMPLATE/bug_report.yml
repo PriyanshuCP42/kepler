@@ -7,14 +7,14 @@ body:
       value: |
         Thanks for taking the time. A bug we can make happen ourselves gets fixed; one we can't gets closed with `status: needs repro` until it can be.
 
-        - **Questions** ("how do I…", "why does BRAIN…") go to [Discussions](https://github.com/residual-lab/alpha-harness/discussions/categories/q-a), not here.
+        - **Questions** ("how do I…", "why does BRAIN…") go to [Discussions](https://github.com/PriyanshuCP42/kepler/discussions/categories/q-a), not here.
         - **Update first.** If the sidebar shows an **Update** button, install it and check the bug is still there.
-        - **Search** [open and closed issues](https://github.com/residual-lab/alpha-harness/issues?q=is%3Aissue) first. If yours is there, add your details to it instead.
+        - **Search** [open and closed issues](https://github.com/PriyanshuCP42/kepler/issues?q=is%3Aissue) first. If yours is there, add your details to it instead.
 
   - type: input
     id: version
     attributes:
-      label: Alpha Harness version
+      label: Kepler version
       description: Shown at the bottom of the sidebar, and under Settings › Updates. Write the number, not "latest".
       placeholder: "2026.10.20"
     validations:

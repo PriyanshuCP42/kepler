@@ -31,7 +31,7 @@ import { SETTINGS_SHORTCUT, useSettings } from './settings'
 import { UpdateBadge, useQuitApp, useUpdateStatus, VersionBadge } from './update'
 
 /** GitHub's own chooser: a bug, a feature, or a security report. */
-const FEEDBACK_URL = 'https://github.com/residual-lab/alpha-harness/issues/new/choose'
+const FEEDBACK_URL = 'https://github.com/PriyanshuCP42/kepler/issues/new/choose'
 
 /** Areas a new consultant has to open once: Data (download fields) and AI (add a key). They flash until visited. */
 const ONBOARDING: readonly string[] = ['data', 'ai']

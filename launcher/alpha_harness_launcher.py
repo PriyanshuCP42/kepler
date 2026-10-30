@@ -36,7 +36,7 @@ from alpha_harness.window import open_window
 #: Written in by the release workflow; the version a fresh machine installs.
 BUILD_VERSION = "0.0.0"
 REPOSITORY_VARIABLE = "ALPHA_HARNESS_REPOSITORY"
-REPOSITORY = os.environ.get(REPOSITORY_VARIABLE) or "residual-lab/alpha-harness"
+REPOSITORY = os.environ.get(REPOSITORY_VARIABLE) or "PriyanshuCP42/kepler"
 DOWNLOAD = f"https://github.com/{REPOSITORY}/releases/download"
 
 HOME_VARIABLE = "ALPHA_HARNESS_HOME"

@@ -7,7 +7,7 @@ body:
       value: |
         A request is judged on the problem it solves, so lead with the problem. Requests are accepted, declined, or closed as duplicates; a closed request is a decision, not neglect.
 
-        Still forming the idea? Talk it through in [Ideas](https://github.com/residual-lab/alpha-harness/discussions/categories/ideas) first. Search [open and closed issues](https://github.com/residual-lab/alpha-harness/issues?q=is%3Aissue) too, and add to an existing request rather than opening another.
+        Still forming the idea? Talk it through in [Ideas](https://github.com/PriyanshuCP42/kepler/discussions/categories/ideas) first. Search [open and closed issues](https://github.com/PriyanshuCP42/kepler/issues?q=is%3Aissue) too, and add to an existing request rather than opening another.
 
   - type: dropdown
     id: area

@@ -41,7 +41,7 @@ log = structlog.get_logger(__name__)
 
 PACKAGE = "alpha-harness"
 REPOSITORY_VARIABLE = "ALPHA_HARNESS_REPOSITORY"
-REPOSITORY = os.environ.get(REPOSITORY_VARIABLE) or "residual-lab/alpha-harness"
+REPOSITORY = os.environ.get(REPOSITORY_VARIABLE) or "PriyanshuCP42/kepler"
 _OWNER, _, _NAME = REPOSITORY.partition("/")
 #: GitHub's latest release, as the release workflow copies it to GitHub Pages. Never the API:
 #: that allows sixty anonymous calls an hour per address, and a college hostel puts hundreds
@@ -72,11 +72,11 @@ LAUNCHER_NEEDED = "2026.10.21rc1"
 def _launcher_asset() -> str:
     """The release download for this machine, named as the release names it."""
     if sys.platform == "win32":
-        return "AlphaHarness-windows-x64-setup.exe"
+        return "Kepler-windows-x64-setup.exe"
     arm = platform.machine().lower() in ("arm64", "aarch64")
     if sys.platform == "darwin":
-        return f"AlphaHarness-macOS-{'arm64' if arm else 'x86_64'}.dmg"
-    return "AlphaHarness-linux-amd64.deb"
+        return f"Kepler-macOS-{'arm64' if arm else 'x86_64'}.dmg"
+    return "Kepler-linux-amd64.deb"
 
 
 #: The launcher download to fetch for this machine, for the notice that asks for a newer one.
@@ -265,9 +265,7 @@ async def _ask() -> tuple[Release | None, str | None]:
     problem: str | None = None
     try:
         async with httpx2.AsyncClient(timeout=CHECK_TIMEOUT, follow_redirects=True) as client:
-            response = await client.get(
-                LATEST_URL, headers={"User-Agent": f"AlphaHarness/{current()}"}
-            )
+            response = await client.get(LATEST_URL, headers={"User-Agent": f"Kepler/{current()}"})
         if response.status_code == 404:
             problem = "No release has been published yet."
         elif response.status_code >= 400:

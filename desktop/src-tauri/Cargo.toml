@@ -1,6 +1,6 @@
 [package]
 name = "alpha-harness"
-description = "Alpha Harness on the desktop: installs, updates and supervises the app, and shows it in its own window."
+description = "Kepler on the desktop: installs, updates and supervises the app, and shows it in its own window."
 # Semver for Cargo only; CI gives the installers a semver version made from the tag. The release
 # version itself (dated, possibly with a fourth number or an rc suffix) arrives as
 # ALPHA_HARNESS_VERSION at build time: see build.rs.

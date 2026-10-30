@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Alpha Harness",
+  "productName": "Kepler",
   "version": "0.0.0",
   "identifier": "lab.residual.alphaharness",
   "build": {

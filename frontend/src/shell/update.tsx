@@ -207,7 +207,7 @@ function LauncherNotice({
   collapsed,
 }: {
   version: string | null
-  /** The release download for this machine, e.g. `AlphaHarness-macOS-arm64.dmg`. */
+  /** The release download for this machine, e.g. `Kepler-macOS-arm64.dmg`. */
   file: string
   url: string
   collapsed: boolean
