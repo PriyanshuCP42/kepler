@@ -75,7 +75,7 @@ export function SignIn({ storedEmail }: { storedEmail: string | null }) {
       <div className="flex w-full max-w-120 flex-col gap-8">
         <div className="flex items-center gap-3 self-center">
           <img src="/mark.svg" alt="" className="size-10" />
-          <span className="text-headline font-semibold text-ink">Signal Foundry</span>
+          <span className="text-headline font-semibold text-ink">Kepler</span>
         </div>
 
         <form

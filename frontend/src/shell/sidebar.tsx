@@ -296,7 +296,7 @@ export function Sidebar({
             ...(launched
               ? [
                   {
-                    label: 'Quit Signal Foundry',
+                    label: 'Quit Kepler',
                     icon: <PowerIcon />,
                     onClick: () => setQuitting(true),
                   },
@@ -333,7 +333,7 @@ export function Sidebar({
       <Confirm
         open={quitting}
         onOpenChange={setQuitting}
-        title="Quit Signal Foundry?"
+        title="Quit Kepler?"
         confirmLabel="Quit"
         pending={quit.isPending}
         onConfirm={() => quit.mutate()}

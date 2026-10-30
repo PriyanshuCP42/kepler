@@ -168,7 +168,7 @@ DEFAULT_PROVIDER = "google"
 PAID_NOTE = (
     "These bill your own account. Nothing here is needed — every provider above is free — "
     "but a key you already pay for is not held to a free tier's daily limit. You set a "
-    "daily request cap when you add one, and Signal Foundry stops at it."
+    "daily request cap when you add one, and Kepler stops at it."
 )
 
 

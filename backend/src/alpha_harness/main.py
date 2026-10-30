@@ -125,7 +125,7 @@ def create_app() -> FastAPI:
             await state.shutdown()
 
     app = FastAPI(
-        title="Signal Foundry",
+        title="Kepler",
         description=DESCRIPTION,
         # One source of truth: the installed distribution's own metadata, which the release
         # tag sets. A hardcoded string here drifts from what the updater compares against.

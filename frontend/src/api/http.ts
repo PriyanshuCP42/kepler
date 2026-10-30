@@ -34,8 +34,8 @@ export class ApiError extends Error {
 function describe(status: number): string {
   if (status === 0)
     return import.meta.env.DEV
-      ? 'Cannot reach the Signal Foundry backend. Start it on port 8000 and try again.'
-      : 'Cannot reach Signal Foundry: it is not running. Open it again.'
+      ? 'Cannot reach the Kepler backend. Start it on port 8000 and try again.'
+      : 'Cannot reach Kepler: it is not running. Open it again.'
   if (status >= 500) return 'The backend failed while handling that request.'
   return `The request was refused (${status}).`
 }

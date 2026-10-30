@@ -34,7 +34,7 @@ def _command() -> list[str] | None:
             return [
                 "systemd-inhibit",
                 "--what=sleep:idle",
-                "--who=Signal Foundry",
+                "--who=Kepler",
                 "--why=Simulations are pending",
                 "cat",
             ]

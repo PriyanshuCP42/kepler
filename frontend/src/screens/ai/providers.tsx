@@ -255,7 +255,7 @@ function AddKeyDialog({
             {provider.paid && (
               <Field
                 label="Daily request cap"
-                hint="Signal Foundry stops at this many requests a day on this key, and starts again when each model's day resets. You can change it later."
+                hint="Kepler stops at this many requests a day on this key, and starts again when each model's day resets. You can change it later."
               >
                 <Input
                   type="number"

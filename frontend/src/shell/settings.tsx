@@ -127,7 +127,7 @@ const ABOUT: Record<SectionId, string> = {
   tasks: 'What a new task in any lab or tool starts with.',
   alphas:
     'What is kept on this computer as Alphas come back from BRAIN, and which model writes their descriptions.',
-  updates: 'How Signal Foundry finds and installs new versions.',
+  updates: 'How Kepler finds and installs new versions.',
 }
 
 function Section({ id }: { id: SectionId }) {
@@ -444,7 +444,7 @@ function UpdateRows({ current, change }: Rows) {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 flex-col gap-0.5">
             <span className="text-body font-medium text-ink">
-              {data?.isRelease ? `Signal Foundry ${data.current}` : 'Development build'}
+              {data?.isRelease ? `Kepler ${data.current}` : 'Development build'}
             </span>
             <Status>
               {!data
@@ -512,7 +512,7 @@ function UpdateRows({ current, change }: Rows) {
       />
       <SettingRow
         title="Install updates automatically"
-        description="When a newer version is out, Signal Foundry installs it and restarts by itself, but only once no simulations are running, so a run is never cut short. Off, the Update button in the sidebar waits for you."
+        description="When a newer version is out, Kepler installs it and restarts by itself, but only once no simulations are running, so a run is never cut short. Off, the Update button in the sidebar waits for you."
         control={(labels) => (
           <Switch
             checked={current.autoUpdate}
@@ -523,8 +523,7 @@ function UpdateRows({ current, change }: Rows) {
       >
         {data && !data.canInstall && data.isRelease && (
           <Status>
-            This copy was not started by the Signal Foundry launcher, so it cannot install updates
-            itself.
+            This copy was not started by the Kepler launcher, so it cannot install updates itself.
           </Status>
         )}
         {current.autoUpdate && current.updateCheckHours === 0 && (
