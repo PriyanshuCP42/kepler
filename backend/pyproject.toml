@@ -83,6 +83,8 @@ lint.ignore = [ "ANN401", "N818", "S311" ]
 lint.per-file-ignores."src/alpha_harness/api/*" = [ "TC" ]
 # `type_annotation_map` is SQLAlchemy's documented declarative idiom.
 lint.per-file-ignores."src/alpha_harness/db/models.py" = [ "RUF012" ]
+# A command run in a terminal: printing its progress is the point.
+lint.per-file-ignores."src/alpha_harness/compact.py" = [ "T201" ]
 # Self-checks run as scripts: assert and print are the point.
 lint.per-file-ignores."tests/*" = [ "ANN", "ARG", "D", "INP001", "PLR2004", "S101", "S105", "S106", "SLF001", "T201" ]
 # "›" is the category breadcrumb separator shown in the UI.

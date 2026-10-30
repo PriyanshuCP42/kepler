@@ -544,6 +544,19 @@ class Trial(Base):
     )
 
 
+class TrialDistribution(Base):
+    """One Optuna distribution, stored once and referenced by every trial that drew from it.
+
+    See :mod:`alpha_harness.labs.distributions`: a trial stores ``ref:<digest>`` in place of
+    any distribution longer than a few hundred characters.
+    """
+
+    __tablename__ = "trial_distribution"
+
+    digest: Mapped[str] = mapped_column(String(64), primary_key=True)
+    body: Mapped[str] = mapped_column(Text)
+
+
 # A trial row carries its whole search space and runs to hundreds of kilobytes, so reading
 # ``message`` from the table means paging through every row's overflow. The Tasks list counts
 # the trials answered for free by exactly these columns; this index answers it alone.

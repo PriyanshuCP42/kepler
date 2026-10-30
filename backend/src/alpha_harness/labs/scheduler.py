@@ -18,7 +18,7 @@ from ..brain.platform import MULTI_SIMULATION_SIZE
 from ..brain.schemas import SimulationRequest, SimulationSettings, SimulationType
 from ..brain.settings_schema import validate_settings
 from ..db.models import SimStatus, SimulationRecord, Study, StudyStatus, Trial, TrialState, utcnow
-from . import ga, search, template
+from . import distributions, ga, search, template
 from .objectives import StudyNotFoundError
 from .params import (
     CORRELATION_BREAKER,
@@ -559,17 +559,22 @@ async def _queue(
     number = last_number
     async with optimizer.db.session() as session:
         batch: list[Trial] = []
+        bodies: dict[str, str] = {}
         for asked, params, request in picked:
             number += 1
+            stored, large = distributions.pack(
+                {
+                    name: FROM_SPACE if name in slots else distribution_to_json(distribution)
+                    for name, distribution in (asked.distributions.items() if asked else ())
+                }
+            )
+            bodies.update(large)
             batch.append(
                 Trial(
                     study_id=row.id,
                     number=number,
                     params=params,
-                    distributions={
-                        name: FROM_SPACE if name in slots else distribution_to_json(distribution)
-                        for name, distribution in (asked.distributions.items() if asked else ())
-                    },
+                    distributions=stored,
                     expression=request.regular,
                     settings=request.settings.model_dump(by_alias=True, exclude_none=True),
                     generation=params.get("generation"),
@@ -579,6 +584,7 @@ async def _queue(
             )
             if asked is not None:
                 live[number] = asked
+        await distributions.save(session, bodies)
         session.add_all(batch)
         # Written before anything is queued: queued work outlives a crash and spends quota,
         # so it must never exist without the trial that scores it. Resending a parked trial

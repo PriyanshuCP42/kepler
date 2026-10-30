@@ -38,8 +38,8 @@ from ..db.models import (
     utcnow,
 )
 from ..vault.yields import checks_of, clean, gating_results, limits_of, verdict
+from . import distributions, scheduler
 from . import objectives as obj
-from . import scheduler
 from .objectives import StudyNotFoundError
 from .params import SEARCH_SAMPLER, TASK_SAMPLERS, TEMPLATE_SAMPLER, SearchParams, params_of
 
@@ -416,7 +416,9 @@ class Optimizer:
             rows = await session.execute(
                 select(Trial.id, Trial.distributions).where(Trial.id.in_(trial_ids))
             )
-            return {trial_id: raw or {} for trial_id, raw in rows.tuples()}
+            stored = {trial_id: raw or {} for trial_id, raw in rows.tuples()}
+            bodies = await distributions.resolve(session, stored.values())
+        return {trial_id: distributions.unpack(raw, bodies) for trial_id, raw in stored.items()}
 
     async def _close_unsent(
         self, study_id: int, sampler: str, unsent: list[tuple[Trial, bool]]
@@ -460,21 +462,28 @@ class Optimizer:
             return cached
 
         async with self.db.session() as session:
-            history = [
-                {
-                    "params": params or {},
-                    "distributions": distributions or {},
-                    "values": values,
-                    "state": state,
-                }
-                for params, distributions, values, state in (
+            rows = (
+                (
                     await session.execute(
                         select(Trial.params, Trial.distributions, Trial.values, Trial.state)
                         .where(Trial.study_id == study_id)
                         .order_by(Trial.number)
                     )
-                ).tuples()
-            ]
+                )
+                .tuples()
+                .all()
+            )
+            stored: list[dict[str, Any]] = [raw or {} for _, raw, _, _ in rows]
+            bodies = await distributions.resolve(session, stored)
+        history = [
+            {
+                "params": params or {},
+                "distributions": distributions.unpack(raw, bodies),
+                "values": values,
+                "state": state,
+            }
+            for (params, _, values, state), raw in zip(rows, stored, strict=True)
+        ]
 
         from optuna.samplers import TPESampler
 
