@@ -3,6 +3,7 @@ import {
   ChartPieIcon,
   DatabaseIcon,
   FlaskConicalIcon,
+  GaugeIcon,
   Grid3x3Icon,
   LayersIcon,
   LayoutGridIcon,
@@ -56,6 +57,12 @@ export const NAV = [
     group: '',
     label: 'Research HQ',
     icon: Building2Icon,
+  },
+  {
+    to: '/autopilot',
+    group: '',
+    label: 'Autopilot',
+    icon: GaugeIcon,
   },
   {
     to: '/dashboard',

@@ -261,6 +261,9 @@ class CriticVerdict(Base):
     pool_correlation: Mapped[float | None] = mapped_column(Float)
     family_checked_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
     scored_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
+    #: When its simulation finished and the Critic first judged it; ``None`` for an alpha only
+    #: ever scored by a re-score of the vault. Today's funnel counts by it.
+    landed_at: Mapped[datetime | None] = mapped_column(UtcDateTime, index=True)
 
 
 class TaskQuota(Base):

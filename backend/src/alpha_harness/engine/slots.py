@@ -292,7 +292,9 @@ class BatchEngine:
 
         log.info("engine.enqueued", task=task, queued=len(queued), skipped=len(skipped))
         if self.bus is not None and queued:
-            self.bus.handoff("writers", "validator", "candidates", len(queued), _lab_of(task))
+            # Template and Search Lab work reaches the Validator through the Pre-screen.
+            source = "prescreen" if _lab_of(task) in SCREENED_LABS else "writers"
+            self.bus.handoff(source, "validator", "candidates", len(queued), _lab_of(task))
             if skipped:
                 self.bus.count("validator", "duplicates skipped", len(skipped))
         await self.tracker.notify()
@@ -1156,6 +1158,10 @@ def _check_expression(payload: dict[str, Any]) -> None:
     expression = payload.get("regular")
     if isinstance(expression, str):
         parse(expression)
+
+
+#: Labs whose candidates the Pre-screen ranks before they are queued.
+SCREENED_LABS = frozenset({"template", "search"})
 
 
 def _lab_of(task: str) -> str:

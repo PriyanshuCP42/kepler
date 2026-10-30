@@ -101,7 +101,7 @@ ROSTER: tuple[Agent, ...] = (
         "hypothesis", "Hypothesis Writer", "Turns an economic idea into a template", 3, 2, "planned"
     ),
     Agent("writers", "Lab Writers", "The five labs, writing candidate alphas", 2, 0, "live"),
-    Agent("prescreen", "Pre-screen", "Ranks candidates by predicted pass rate", 2, 1, "planned"),
+    Agent("prescreen", "Pre-screen", "Ranks candidates by predicted pass rate", 2, 1, "live"),
     Agent(
         "validator",
         "Validator",

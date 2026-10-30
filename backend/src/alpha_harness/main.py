@@ -29,6 +29,7 @@ from .api import (
     agents,
     alphas,
     auth,
+    autopilot,
     catalog,
     chat,
     competitions,
@@ -190,6 +191,7 @@ def create_app() -> FastAPI:
     app.include_router(update.router)
     app.include_router(preferences.router)
     app.include_router(agents.router)
+    app.include_router(autopilot.router)
     app.include_router(ws.router)
 
     @app.get("/api/health", tags=["meta"])

@@ -30,6 +30,12 @@ const hq = createRoute({
   component: lazyRouteComponent(() => import('@/screens/hq'), 'HqScreen'),
 })
 
+const autopilot = createRoute({
+  getParentRoute: () => root,
+  path: '/autopilot',
+  component: lazyRouteComponent(() => import('@/screens/autopilot'), 'AutopilotScreen'),
+})
+
 const dashboard = createRoute({
   getParentRoute: () => root,
   path: '/dashboard',
@@ -218,6 +224,7 @@ const pyramids = createRoute({
 const routeTree = root.addChildren([
   index,
   hq,
+  autopilot,
   dashboard,
   matrix,
   data,

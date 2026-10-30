@@ -49,6 +49,7 @@ if TYPE_CHECKING:  # pragma: no cover
     import optuna
 
     from ..account import PlatformMetadata
+    from ..agents.screener import Screener
     from ..brain.endpoints import BrainEndpoints
     from ..db.sqlite import Database
     from ..engine.slots import BatchEngine
@@ -95,6 +96,8 @@ class Optimizer:
         #: Stored alphas: Evolution Lab parents, Power Pool Lab context.
         self.alphas = alphas
         self.backfill = backfill
+        #: The Pre-screen agent, set by the app; ``None`` sends what the labs draw unfiltered.
+        self.screener: Screener | None = None
         self.studies: dict[int, optuna.Study] = {}
         #: Live Optuna trial objects for the round in flight, keyed study -> our trial
         #: number. Lost on restart, which :func:`_tell_many` handles by replaying.

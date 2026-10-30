@@ -19,6 +19,7 @@ from .agents.bus import AgentBus
 from .agents.conductor import Conductor
 from .agents.critic import Critic
 from .agents.families import FamilyClerk
+from .agents.screener import Screener
 from .brain.client import BrainClient
 from .brain.endpoints import BrainEndpoints
 from .brain.errors import BrainError, BrainTransportError
@@ -132,6 +133,7 @@ class AppState:
             can_fetch=lambda: self.auth.session.authenticated,
         )
         self.engine.bus = self.agents
+        self.screener = Screener(self.settings.data_dir / "prescreen", self.catalog, self.agents)
 
         self.models = ModelRegistry(self.db)
         self.llm = LLMService(self.db, self.sealer, self.models)
@@ -146,6 +148,7 @@ class AppState:
             backfill=self.backfill,
         )
         self.optimizer.llm = self.llm
+        self.optimizer.screener = self.screener
 
         # Imported here: the API layer builds on this module.
         from .api.lab_tasks import requeue
@@ -212,6 +215,7 @@ class AppState:
         await self.engine.start()
         await self.optimizer.start()
         await self.families.start()
+        await self.screener.start()
         await self.conductor.start()
         self._session_watch = asyncio.create_task(self._watch_session(), name="session-watch")
         log.info("startup.complete", data_dir=str(self.settings.data_dir))
@@ -342,6 +346,7 @@ class AppState:
                 await watch
         await self.conductor.stop()
         await self.families.stop()
+        await self.screener.stop()
         await self.agents.stop()
         await self.optimizer.stop()
         await self.engine.stop()

@@ -230,7 +230,7 @@ class Critic:
         if not rows:
             return None
         result = judge(rows[0])
-        await self._save([(rows[0], result)])
+        await self._save([(rows[0], result)], landed=True)
         self._report([result])
         return result
 
@@ -276,7 +276,9 @@ class Critic:
             )
             return {str(v): int(n) for v, n in rows.all()}
 
-    async def _save(self, judged: list[tuple[dict[str, Any], Judgement]]) -> None:
+    async def _save(
+        self, judged: list[tuple[dict[str, Any], Judgement]], *, landed: bool = False
+    ) -> None:
         now = utcnow()
         values = [
             {
@@ -289,6 +291,7 @@ class Critic:
                 "delay": row.get("delay"),
                 "universe": row.get("universe"),
                 "scored_at": now,
+                "landed_at": now if landed else None,
             }
             for row, j in judged
         ]
@@ -309,6 +312,8 @@ class Critic:
                 "universe": statement.excluded.universe,
                 "scored_at": statement.excluded.scored_at,
                 "family_checked_at": None,
+                # The first landing is kept: a re-score never makes an old alpha today's.
+                "landed_at": func.coalesce(CriticVerdict.landed_at, statement.excluded.landed_at),
             },
         )
         async with self.db.session() as session:

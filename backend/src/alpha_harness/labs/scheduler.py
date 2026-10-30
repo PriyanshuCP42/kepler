@@ -282,6 +282,8 @@ def ask_points(
     seen: dict[tuple[str, str], float | bool],
     cover: list[str],
     schema: dict[str, Any] | None = None,
+    gate: Any = None,
+    tally: dict[str, int] | None = None,
 ) -> tuple[list[tuple[Any, dict[str, Any], SimulationRequest]], str | None]:
     """Ask for ``want`` new simulations. Runs off the event loop.
 
@@ -291,6 +293,11 @@ def ask_points(
 
     Also returns the first setting BRAIN refused, so a task left with nothing to ask can say
     whether BRAIN withdrew what it searches or the search ran out of new points.
+
+    With a Pre-screen ``gate`` it draws ``gate.oversample`` points for each one wanted and
+    keeps the ones the gate chooses; the rest are told as failed, which the sampler ignores,
+    so the model's beliefs never become the search's. ``tally`` receives how many points were
+    drawn and kept.
     """
     from optuna.trial import TrialState as OptunaState
 
@@ -303,8 +310,9 @@ def ask_points(
     picked: list[tuple[Any, dict[str, Any], SimulationRequest]] = []
     keys: set[tuple[str, str]] = set()
     withdrawn: str | None = None
-    for _ in range(want * 5):
-        if len(picked) >= want:
+    target = want * gate.oversample if gate is not None else want
+    for _ in range(target * 5):
+        if len(picked) >= target:
             break
         trial = study.ask()
         params, request = lab.draw(trial, run, choices)
@@ -337,6 +345,15 @@ def ask_points(
             continue
         keys.add(key)
         picked.append((trial, params, request))
+    drawn = len(picked)
+    if gate is not None and drawn > want:
+        kept = set(gate.choose([request for _, _, request in picked], want))
+        for index, (trial, _, _) in enumerate(picked):
+            if index not in kept:
+                study.tell(trial, state=OptunaState.FAIL)
+        picked = [point for index, point in enumerate(picked) if index in kept]
+    if tally is not None:
+        tally["drawn"], tally["kept"] = drawn, len(picked)
     return picked, withdrawn
 
 
@@ -479,9 +496,15 @@ async def advance(optimizer: Optimizer, study_id: int) -> int:
 
     study = await optimizer.optuna_study(study_id, row)
     schema = await optimizer.metadata.cached_settings_schema()
+    screener = optimizer.screener
+    # The first pass over each field is the search's own plan, so it is never screened.
+    gate = screener.gate() if screener is not None and not cover else None
+    tally: dict[str, int] = {}
     picked, withdrawn = await asyncio.to_thread(
-        ask_points, study, lab, run, want, seen, cover, schema
+        ask_points, study, lab, run, want, seen, cover, schema, gate, tally
     )
+    if screener is not None:
+        screener.record(tally.get("drawn", 0), tally.get("kept", 0))
     if not picked:
         # Nothing new left to ask: the task is done once what is out has come back.
         if not waiting:
