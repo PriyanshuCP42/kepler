@@ -81,10 +81,10 @@ lint.ignore = [ "ANN401", "N818", "S311" ]
 # (SORTABLE, ALPHA_METRICS, _KEYS).
 # FastAPI resolves route signatures at runtime; ruff can't see that through `@router.get`.
 lint.per-file-ignores."src/alpha_harness/api/*" = [ "TC" ]
-# `type_annotation_map` is SQLAlchemy's documented declarative idiom.
-lint.per-file-ignores."src/alpha_harness/db/models.py" = [ "RUF012" ]
 # A command run in a terminal: printing its progress is the point.
 lint.per-file-ignores."src/alpha_harness/compact.py" = [ "T201" ]
+# `type_annotation_map` is SQLAlchemy's documented declarative idiom.
+lint.per-file-ignores."src/alpha_harness/db/models.py" = [ "RUF012" ]
 # Self-checks run as scripts: assert and print are the point.
 lint.per-file-ignores."tests/*" = [ "ANN", "ARG", "D", "INP001", "PLR2004", "S101", "S105", "S106", "SLF001", "T201" ]
 # "›" is the category breadcrumb separator shown in the UI.
@@ -106,6 +106,11 @@ project-includes = [ "src" ]
 # Honor the audited `# pyright: ignore[...]` sites instead of duplicating them.
 permissive-ignores = true
 
+[tool.pytest]
+ini_options.testpaths = [ "tests" ]
+ini_options.asyncio_default_fixture_loop_scope = "function"
+ini_options.asyncio_mode = "auto"
+
 [tool.basedpyright]
 pythonVersion = "3.14"
 venv = ".venv"
@@ -121,8 +126,3 @@ reportUnknownLambdaType = false
 reportUnknownMemberType = false
 reportUnknownParameterType = false
 reportUnknownVariableType = false
-
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
-asyncio_default_fixture_loop_scope = "function"
-testpaths = [ "tests" ]

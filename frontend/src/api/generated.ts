@@ -4,6 +4,83 @@
  */
 
 export interface paths {
+    "/api/agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Roster
+         * @description Every agent, its state and counters, and the latest handoffs between them.
+         */
+        get: operations["roster_api_agents_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agents/critic": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Critic Summary */
+        get: operations["critic_summary_api_agents_critic_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agents/critic/rescore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rescore
+         * @description Score every alpha in the vault again. Runs in the background; costs no quota.
+         */
+        post: operations["rescore_api_agents_critic_rescore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agents/shortlist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Shortlist
+         * @description Family leaders that passed every gate, best first: one per distinct idea.
+         */
+        get: operations["shortlist_api_agents_shortlist_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/alphas/summary": {
         parameters: {
             query?: never;
@@ -274,6 +351,46 @@ export interface paths {
          *     is what lets the window and this poll finish in either order.
          */
         post: operations["verify_api_auth_verify_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/autopilot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Overview
+         * @description Each stage of today's funnel, counted since the platform's day began.
+         */
+        get: operations["overview_api_autopilot_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/autopilot/prescreen/train": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Train
+         * @description Retrain the Pre-screen on the vault now. Runs in the background; costs no quota.
+         */
+        post: operations["train_api_autopilot_prescreen_train_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2285,6 +2402,17 @@ export interface components {
             /** Cost Bps */
             cost_bps: number;
         };
+        /** AgentRoster */
+        AgentRoster: {
+            /** Agents */
+            agents: {
+                [key: string]: unknown;
+            }[];
+            /** Handoffs */
+            handoffs: {
+                [key: string]: unknown;
+            }[];
+        };
         /** AlphaClassification */
         AlphaClassification: {
             /** Id */
@@ -2617,6 +2745,14 @@ export interface components {
         AutoSeedsStarted: {
             /** Jobid */
             jobId: string;
+        };
+        /** Autopilot */
+        Autopilot: {
+            /** Funnel */
+            funnel: components["schemas"]["Stage"][];
+            prescreen: components["schemas"]["PreScreen"];
+            /** Shortlist */
+            shortlist: components["schemas"]["ShortlistEntry"][];
         };
         /**
          * AvailabilityCounts
@@ -2987,6 +3123,17 @@ export interface components {
             b: string;
             /** Correlation */
             correlation: number;
+        };
+        /** CriticSummary */
+        CriticSummary: {
+            /** Families */
+            families: number;
+            /** Placed */
+            placed: number;
+            /** Verdicts */
+            verdicts: {
+                [key: string]: number;
+            };
         };
         /** DataFieldDetail */
         DataFieldDetail: {
@@ -4220,6 +4367,33 @@ export interface components {
             /** Region */
             region: string;
         };
+        /** PreScreen */
+        PreScreen: {
+            /** Active */
+            active: boolean;
+            /** Auc */
+            auc: number | null;
+            /** Exploreshare */
+            exploreShare: number;
+            /** Kepttoday */
+            keptToday: number;
+            /** Lift */
+            lift: number | null;
+            /** Oversample */
+            oversample: number;
+            /** Positives */
+            positives: number;
+            /** Reason */
+            reason: string;
+            /** Samples */
+            samples: number;
+            /** Screenedtoday */
+            screenedToday: number;
+            /** Status */
+            status: string;
+            /** Trainedat */
+            trainedAt: string | null;
+        };
         /** Preferences */
         Preferences: {
             /**
@@ -4783,6 +4957,34 @@ export interface components {
             /** Warnings */
             warnings: string[];
         };
+        /** Shortlist */
+        Shortlist: {
+            /** Alphas */
+            alphas: components["schemas"]["ShortlistEntry"][];
+        };
+        /** ShortlistEntry */
+        ShortlistEntry: {
+            /** Alphaid */
+            alphaId: string;
+            /** Delay */
+            delay: number | null;
+            /** Familysize */
+            familySize: number;
+            /** Gates */
+            gates: {
+                [key: string]: unknown;
+            };
+            /** Poolcorrelation */
+            poolCorrelation: number | null;
+            /** Reasons */
+            reasons: string[];
+            /** Region */
+            region: string | null;
+            /** Score */
+            score: number;
+            /** Universe */
+            universe: string | null;
+        };
         /**
          * SimStatus
          * @description Local lifecycle. Distinct from the platform's own status.
@@ -4875,6 +5077,22 @@ export interface components {
             truncation: number | null;
             /** Universe */
             universe: string | null;
+        };
+        /** Stage */
+        Stage: {
+            /** Count */
+            count: number | null;
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Note */
+            note: string;
+        };
+        /** Started */
+        Started: {
+            /** Started */
+            started: boolean;
         };
         /** StatsItem */
         StatsItem: {
@@ -5771,6 +5989,97 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    roster_api_agents_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentRoster"];
+                };
+            };
+        };
+    };
+    critic_summary_api_agents_critic_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CriticSummary"];
+                };
+            };
+        };
+    };
+    rescore_api_agents_critic_rescore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Started"];
+                };
+            };
+        };
+    };
+    shortlist_api_agents_shortlist_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Shortlist"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     summary_api_alphas_summary_get: {
         parameters: {
             query?: never;
@@ -6139,6 +6448,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    overview_api_autopilot_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Autopilot"];
+                };
+            };
+        };
+    };
+    train_api_autopilot_prescreen_train_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Started"];
                 };
             };
         };
