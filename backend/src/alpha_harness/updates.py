@@ -367,7 +367,7 @@ def request(version: str, *, wheel_url: str | None = None) -> Path:
     home = launcher_home()
     if home is None:
         raise RuntimeError(
-            "This copy was not started by the Alpha Harness launcher, so it cannot update "
+            "This copy was not started by the Signal Foundry launcher, so it cannot update "
             "itself. Install the new version the same way you installed this one."
         )
     home.mkdir(parents=True, exist_ok=True)

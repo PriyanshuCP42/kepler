@@ -55,10 +55,10 @@ export function Shell() {
               </code>
             </Empty>
           ) : (
-            <Empty icon={<ServerCrashIcon />} title="Alpha Harness is not running">
+            <Empty icon={<ServerCrashIcon />} title="Signal Foundry is not running">
               <p>
                 This window reconnects by itself as soon as it is back. If it does not come back,
-                open Alpha Harness again.
+                open Signal Foundry again.
               </p>
               <p className="mt-2">
                 If it keeps stopping, the reason is in <span className="num">launcher.log</span> in

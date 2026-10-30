@@ -42,7 +42,7 @@ WINDOWS_ASSOCIATIONS = r"Software\Microsoft\Windows\Shell\Associations\UrlAssoci
 #: hold spaces, so it runs to ``.exe`` rather than to the first space.
 WINDOWS_OPENER = re.compile(r'^\s*(?:"([^"]+)"|(.+?\.exe)\b)', re.IGNORECASE)
 #: Lets a process leave the job the Windows launcher runs the app in. A browser started
-#: inside it would be killed when Alpha Harness quits, taking the reader's other windows too.
+#: inside it would be killed when Signal Foundry quits, taking the reader's other windows too.
 BREAKAWAY = 0x01000000
 
 

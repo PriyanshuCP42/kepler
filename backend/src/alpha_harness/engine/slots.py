@@ -33,6 +33,7 @@ from ..brain.filters import platform_midnight
 from ..brain.platform import MULTI_SIMULATION_SIZE, SIMULATION_SLOTS
 from ..brain.schemas import QUICK_MODE, SimulationRequest
 from ..db.models import ACTIVE, DedupEntry, SimStatus, SimulationRecord, Study, TaskQuota, utcnow
+from ..labs.fastexpr import ParseError, parse
 from ..tasks import spawn
 from .awake import StayAwake
 from .lifecycle import (
@@ -54,6 +55,7 @@ from .packer import Batch, WorkItem, allocate_slots, demand_by_task, key_of, mat
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
+    from ..agents.bus import AgentBus
     from ..brain.endpoints import BrainEndpoints
     from ..db.sqlite import Database
     from .tracker import SimulationTracker
@@ -125,6 +127,9 @@ class BatchEngine:
         #: monotonic: that clock stops while the computer sleeps, and BRAIN's day does not.
         self._limit_resets_at: float | None = None
         self._enqueue_lock = asyncio.Lock()
+        #: The Research HQ roster, told about work passing through. Optional: the engine runs
+        #: the same without it.
+        self.bus: AgentBus | None = None
         #: Reads finished batches back beside the scheduling round; at most one at a time.
         self._expansion: asyncio.Task[None] | None = None
         #: Child platform id -> (body, outcome) of a finished child not yet written to its
@@ -286,6 +291,10 @@ class BatchEngine:
                 )
 
         log.info("engine.enqueued", task=task, queued=len(queued), skipped=len(skipped))
+        if self.bus is not None and queued:
+            self.bus.handoff("writers", "validator", "candidates", len(queued), _lab_of(task))
+            if skipped:
+                self.bus.count("validator", "duplicates skipped", len(skipped))
         await self.tracker.notify()
         return {"queued": queued, "skipped": skipped, "outcomes": outcomes}
 
@@ -617,7 +626,8 @@ class BatchEngine:
         for item in items:
             try:
                 SimulationRequest.model_validate(item.payload)
-            except ValidationError as exc:
+                _check_expression(item.payload)
+            except (ValidationError, ParseError) as exc:
                 async with self.db.session() as session:
                     await transition(
                         session,
@@ -625,11 +635,16 @@ class BatchEngine:
                         from_=[SimStatus.QUEUED],
                         status=SimStatus.REJECTED,
                         finished_at=utcnow(),
-                        message=f"The stored request is no longer valid: {exc}"[:500],
+                        message=f"Refused before sending; BRAIN would reject it: {exc}"[:500],
                     )
                 log.warning("engine.invalid_payload", record_id=item.record_id)
                 continue
             valid.append(item)
+        if self.bus is not None:
+            if refused := len(items) - len(valid):
+                self.bus.count("validator", "refused before sending", refused)
+            if valid:
+                self.bus.handoff("validator", "brain", "batch", len(valid), "sent to BRAIN")
         return valid
 
     async def _submit_single(self, item: WorkItem) -> bool:
@@ -1130,3 +1145,19 @@ class BatchEngine:
             .group_by(SimulationRecord.task)
         )
         return {task: int(cost or 0) for task, cost in result.all()}
+
+
+def _check_expression(payload: dict[str, Any]) -> None:
+    """Raise :class:`ParseError` for an expression BRAIN could not read.
+
+    The Validator's offline check: a malformed expression still costs a simulation from the
+    day's quota when BRAIN refuses it, so it is caught here instead.
+    """
+    expression = payload.get("regular")
+    if isinstance(expression, str):
+        parse(expression)
+
+
+def _lab_of(task: str) -> str:
+    """``template-2610...`` -> ``template``: which lab wrote the work, for the handoff label."""
+    return task.split("-", 1)[0]

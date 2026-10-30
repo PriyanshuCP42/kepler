@@ -28,6 +28,8 @@ from .schemas import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from .client import BrainClient, BrainResponse
     from .filters import AlphaQuery
 
@@ -88,6 +90,13 @@ class BrainEndpoints:
 
     def __init__(self, client: BrainClient) -> None:
         self.client = client
+        #: When set, every simulation POST is reserved against it first. ``create_simulation``
+        #: is the one place a simulation leaves the process, so the gate sits here and no
+        #: caller (engine, batch path, sampler) can send around it.
+        self.quota_guard: (
+            Callable[[Any, Callable[[Any], Awaitable[BrainResponse]]], Awaitable[BrainResponse]]
+            | None
+        ) = None
 
     # -- authentication ------------------------------------------------
 
@@ -192,6 +201,13 @@ class BrainEndpoints:
         :mod:`alpha_harness.engine.tracker`, which owns the ordering that keeps cancellation
         safe.
         """
+        if self.quota_guard is not None:
+            return await self.quota_guard(payload, self._post_simulation)
+        return await self._post_simulation(payload)
+
+    async def _post_simulation(
+        self, payload: SimulationRequest | list[SimulationRequest]
+    ) -> BrainResponse:
         if isinstance(payload, list):
             body: Any = [p.to_wire() for p in payload]
         else:

@@ -296,7 +296,7 @@ export function Sidebar({
             ...(launched
               ? [
                   {
-                    label: 'Quit Alpha Harness',
+                    label: 'Quit Signal Foundry',
                     icon: <PowerIcon />,
                     onClick: () => setQuitting(true),
                   },
@@ -333,7 +333,7 @@ export function Sidebar({
       <Confirm
         open={quitting}
         onOpenChange={setQuitting}
-        title="Quit Alpha Harness?"
+        title="Quit Signal Foundry?"
         confirmLabel="Quit"
         pending={quit.isPending}
         onConfirm={() => quit.mutate()}

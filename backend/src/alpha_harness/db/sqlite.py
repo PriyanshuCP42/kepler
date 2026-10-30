@@ -3,6 +3,12 @@
 WAL mode plus a busy timeout: the background simulation tracker writes while HTTP
 handlers read, and SQLite's default rollback journal would make them block each other.
 
+**Writers wait, they do not fail.** Many task workers write at once and SQLite allows a
+single writer, so the others queue on the lock. The busy timeout is generous (a task with
+every core running easily queues writers for longer than SQLite's usual few seconds), and
+the connection pool is sized so those waiting writers cannot exhaust it. Keep sessions short:
+a session holds the write lock from its first write to its commit.
+
 ``create_all`` only creates missing *tables*, so a column added to a model after the
 database was created never appears and surfaces much later as ``no such column``.
 :func:`migrate` closes that gap on every startup by comparing the live schema against
@@ -39,13 +45,22 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+# How long a writer waits for the lock, and how long a caller waits for a pooled connection.
+# Queued writers each hold a connection while they wait, so the pool timeout must outlast the
+# busy timeout or the pool runs dry first.
+_BUSY_TIMEOUT_MS = 60_000
+_POOL_SIZE = 20
+_POOL_OVERFLOW = 40
+_POOL_TIMEOUT_S = 120
+
+
 def _apply_pragmas(dbapi_connection: Any, _record: object) -> None:
     cursor = dbapi_connection.cursor()
     try:
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA synchronous=NORMAL")
         cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.execute("PRAGMA busy_timeout=5000")
+        cursor.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")
     finally:
         cursor.close()
 
@@ -54,7 +69,12 @@ class Database:
     """Owns the engine and hands out sessions."""
 
     def __init__(self, path: Path) -> None:
-        self._engine: AsyncEngine = create_async_engine(f"sqlite+aiosqlite:///{path}")
+        self._engine: AsyncEngine = create_async_engine(
+            f"sqlite+aiosqlite:///{path}",
+            pool_size=_POOL_SIZE,
+            max_overflow=_POOL_OVERFLOW,
+            pool_timeout=_POOL_TIMEOUT_S,
+        )
         event.listen(self._engine.sync_engine, "connect", _apply_pragmas)
         self._sessionmaker = async_sessionmaker(self._engine, expire_on_commit=False)
 

@@ -62,7 +62,7 @@ async def _serve() -> str | None:
     failure = getattr(app.state, "startup_failure", None)
     if failure is None:
         return None
-    return f"Alpha Harness could not start: {str(failure) or type(failure).__name__}"
+    return f"Signal Foundry could not start: {str(failure) or type(failure).__name__}"
 
 
 def _listen() -> socket.socket:
@@ -86,8 +86,8 @@ def _listen() -> socket.socket:
             raise
         # A message, not a code: Python writes it to stderr — the launcher's log — and exits 1.
         raise SystemExit(
-            f"Alpha Harness could not start: another program is using port {PORT}. "
-            "Close it, or restart the computer, then open Alpha Harness again."
+            f"Signal Foundry could not start: another program is using port {PORT}. "
+            "Close it, or restart the computer, then open Signal Foundry again."
         ) from None
     return listening
 

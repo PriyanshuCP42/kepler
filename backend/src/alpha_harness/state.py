@@ -15,6 +15,10 @@ from sqlalchemy import select
 
 from . import preferences, updates
 from .account import AuthService, PlatformMetadata
+from .agents.bus import AgentBus
+from .agents.conductor import Conductor
+from .agents.critic import Critic
+from .agents.families import FamilyClerk
 from .brain.client import BrainClient
 from .brain.endpoints import BrainEndpoints
 from .brain.errors import BrainError, BrainTransportError
@@ -26,6 +30,7 @@ from .config import Settings
 from .db.duck import Catalog
 from .db.models import SimStatus, SimulationRecord, utcnow
 from .db.sqlite import Database, snapshot
+from .engine.budget import QuotaGate
 from .engine.slots import BatchEngine
 from .engine.tracker import SimulationTracker
 from .labs.study import Optimizer
@@ -75,6 +80,16 @@ class AppState:
         self.client = BrainClient(API_BASE)
         self.endpoints = BrainEndpoints(self.client)
         self.metadata = PlatformMetadata(self.db, self.endpoints)
+        self.quota_gate = QuotaGate(
+            self.db,
+            hard_cap=self.settings.daily_simulation_allowance,
+            operating_ceiling=min(
+                self.settings.simulation_operating_ceiling,
+                self.settings.daily_simulation_allowance,
+            ),
+            protected_reserve=self.settings.simulation_protected_reserve,
+            stale_seconds=self.settings.reservation_stale_seconds,
+        )
         self.auth = AuthService(self.db, self.sealer, self.endpoints, metadata=self.metadata)
 
         self.alphas = AlphaVault(self.catalog)
@@ -89,7 +104,10 @@ class AppState:
             self.endpoints,
             on_change=lambda payload: self.hub.broadcast(TOPIC_SIMULATIONS, payload),
             on_unauthorized=self.renew_session,
-            on_alpha=self.backfill.capture,
+            on_alpha=self._alpha_landed,
+        )
+        self.endpoints.quota_guard = lambda payload, send: self.quota_gate.guard(
+            payload, send, observed_used=self.tracker.used_today
         )
         self.engine = BatchEngine(
             self.db, self.endpoints, self.tracker, on_unauthorized=self.renew_session
@@ -102,6 +120,18 @@ class AppState:
             on_progress=lambda payload: self.hub.broadcast(TOPIC_SYNC, payload),
         )
         self.queries = CatalogQueries(self.catalog)
+
+        self.agents = AgentBus(self.hub)
+        self.critic = Critic(self.db, self.alphas, self.agents)
+        self.critic_busy = False
+        self.families = FamilyClerk(
+            self.db,
+            self.alphas,
+            self.backfill,
+            self.agents,
+            can_fetch=lambda: self.auth.session.authenticated,
+        )
+        self.engine.bus = self.agents
 
         self.models = ModelRegistry(self.db)
         self.llm = LLMService(self.db, self.sealer, self.models)
@@ -116,6 +146,11 @@ class AppState:
             backfill=self.backfill,
         )
         self.optimizer.llm = self.llm
+
+        # Imported here: the API layer builds on this module.
+        from .api.lab_tasks import requeue
+
+        self.conductor = Conductor(self, self.agents, requeue)
 
         self._renew_lock = asyncio.Lock()
         self._last_session_check = float("-inf")
@@ -155,6 +190,9 @@ class AppState:
 
         # Not caught: dispatching new work on top of an unreconciled queue is how orphans
         # and double sends start, so a failure here stops startup and says why.
+        # Reservations left open by the last run may have been sent: they become uncertain and
+        # keep counting, so a crash can never hand quota back that was already spent.
+        await self.quota_gate.recover()
         await self.tracker.reconcile()
 
         # A sync killed with the process would otherwise report RUNNING forever.
@@ -173,8 +211,20 @@ class AppState:
         await self.tracker.start()
         await self.engine.start()
         await self.optimizer.start()
+        await self.families.start()
+        await self.conductor.start()
         self._session_watch = asyncio.create_task(self._watch_session(), name="session-watch")
         log.info("startup.complete", data_dir=str(self.settings.data_dir))
+
+    async def _alpha_landed(self, alpha_id: str) -> None:
+        """Store a finished alpha, then let the Critic judge it. A Critic fault never loses it."""
+        await self.backfill.capture(alpha_id)
+        try:
+            result = await self.critic.landed(alpha_id)
+            if result is not None and result.verdict == "pass":
+                self.families.nudge()
+        except Exception:
+            log.warning("critic.landed_failed", alpha_id=alpha_id, exc_info=True)
 
     async def _replay_last_sync(self) -> None:
         """Seed the sync topic with the last finished run, so its figures survive a restart.
@@ -290,6 +340,9 @@ class AppState:
             watch.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await watch
+        await self.conductor.stop()
+        await self.families.stop()
+        await self.agents.stop()
         await self.optimizer.stop()
         await self.engine.stop()
         await self.tracker.stop()

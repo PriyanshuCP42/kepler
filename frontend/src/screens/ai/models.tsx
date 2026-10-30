@@ -184,7 +184,7 @@ export function ModelSetupForm({
       >
         <div className="flex flex-wrap items-start justify-between gap-3">
           <p className="min-w-60 flex-1 text-body-compact text-pretty text-ink-muted">
-            Copy this model's limits from your {provider.label} account. Alpha Harness stops each
+            Copy this model's limits from your {provider.label} account. Signal Foundry stops each
             Key at them, so it never walks into the provider's own wall.
           </p>
           <Button

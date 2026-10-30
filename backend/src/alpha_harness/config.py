@@ -29,6 +29,16 @@ class Settings:
     """Where local state lives."""
 
     data_dir: Path = DATA_DIR
+    #: A consultant's daily simulation allowance, shown until the day's first simulation POST
+    #: returns its x-ratelimit-* headers.
+    daily_simulation_allowance: int = 5000
+    #: What the quota gate lets the app spend in a platform day. Below the allowance until the
+    #: platform's accounting is verified; raise it deliberately. Never above the allowance.
+    simulation_operating_ceiling: int = 4000
+    #: Part of the operating ceiling that ordinary requests cannot touch.
+    simulation_protected_reserve: int = 500
+    #: An unsettled reservation older than this is marked uncertain on restart, never released.
+    reservation_stale_seconds: float = 900.0
 
     @property
     def sqlite_path(self) -> Path:

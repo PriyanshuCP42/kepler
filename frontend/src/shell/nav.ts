@@ -1,4 +1,5 @@
 import {
+  Building2Icon,
   ChartPieIcon,
   DatabaseIcon,
   FlaskConicalIcon,
@@ -50,6 +51,12 @@ export const TOOL_TABS = [
 /** `group` heads a run of items in the sidebar; empty sits above every heading. An item's
  *  area is its path, `to` without the slash. */
 export const NAV = [
+  {
+    to: '/hq',
+    group: '',
+    label: 'Research HQ',
+    icon: Building2Icon,
+  },
   {
     to: '/dashboard',
     group: '',

@@ -114,7 +114,7 @@ export function WindowControls() {
           )}
         </Glyph>
       </button>
-      {/* Closing keeps Alpha Harness in the tray, as the window's own close did. */}
+      {/* Closing keeps Signal Foundry in the tray, as the window's own close did. */}
       <button
         type="button"
         aria-label="Close to the tray"
@@ -206,7 +206,7 @@ export function DesktopNotifications() {
     const before = offered.current
     offered.current = now
     if (before !== undefined && now && now !== before)
-      void notify(`Alpha Harness ${now} is available`, 'Open Alpha Harness to install it.')
+      void notify(`Signal Foundry ${now} is available`, 'Open Signal Foundry to install it.')
   }, [update.data])
 
   return null

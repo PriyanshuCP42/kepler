@@ -370,7 +370,7 @@ INDEX_DESYNC = "Failed to delete all rows from index"
 
 
 class CatalogLockedError(RuntimeError):
-    """Another Alpha Harness backend already has the catalog open.
+    """Another Signal Foundry backend already has the catalog open.
 
     DuckDB allows exactly one writer, so the fix is always the same: stop the other one.
     """
@@ -381,7 +381,7 @@ class CatalogLockedError(RuntimeError):
         if match:
             holder = f" (process {match.group(1)})"
         super().__init__(
-            f"Another Alpha Harness backend{holder} is already running and has "
+            f"Another Signal Foundry backend{holder} is already running and has "
             f"{path} open. DuckDB allows only one writer, so stop the other one and "
             "start again. If you believe nothing else is running, the previous process "
             "did not shut down cleanly — end it and retry."

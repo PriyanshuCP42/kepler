@@ -42,6 +42,32 @@ def camel_dict(obj: Any, exclude: Container[str] = ()) -> dict[str, Any]:
     return {to_camel(k): v for k, v in asdict(obj).items() if k not in exclude}
 
 
+# --- alpha / check models -----------------------------------------------------------
+
+
+class Check(Out):
+    """Individual check entry within an Alpha payload."""
+
+    name: str
+    result: str | None = None
+    # list[Any]: some checks report a list, e.g. ['High Turnover', ...].
+    value: float | int | str | bool | list[Any] | None = None
+
+
+class InSample(Out):
+    """In-sample statistics and check results for an Alpha."""
+
+    checks: list[Check] = []
+
+
+class Alpha(Out):
+    """Alpha definition matching BRAIN API structure."""
+
+    id: str
+    is_: InSample | None = None
+    checks: list[Check] = []
+
+
 # --- simulations: the typed pilot for generated frontend types ---------------------
 
 

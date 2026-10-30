@@ -26,6 +26,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import updates
 from .api import (
+    agents,
     alphas,
     auth,
     catalog,
@@ -124,7 +125,7 @@ def create_app() -> FastAPI:
             await state.shutdown()
 
     app = FastAPI(
-        title="Alpha Harness",
+        title="Signal Foundry",
         description=DESCRIPTION,
         # One source of truth: the installed distribution's own metadata, which the release
         # tag sets. A hardcoded string here drifts from what the updater compares against.
@@ -188,6 +189,7 @@ def create_app() -> FastAPI:
     app.include_router(competitions.router)
     app.include_router(update.router)
     app.include_router(preferences.router)
+    app.include_router(agents.router)
     app.include_router(ws.router)
 
     @app.get("/api/health", tags=["meta"])

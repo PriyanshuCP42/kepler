@@ -7,7 +7,14 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef } from 'react'
 
-export type Topic = 'simulations' | 'tasks' | 'sync' | 'studies' | 'session'
+export type Topic =
+  | 'simulations'
+  | 'tasks'
+  | 'sync'
+  | 'studies'
+  | 'session'
+  | 'agents'
+  | 'agent-handoff'
 
 type Handler = (payload: unknown) => void
 
@@ -109,6 +116,14 @@ window.addEventListener('online', () => telemetry.wake())
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') telemetry.wake()
 })
+/** Run `handler` for every message on `topic`. The handler may change freely. */
+export function useTopic(topic: Topic, handler: (payload: unknown) => void): void {
+  const ref = useRef(handler)
+  useEffect(() => {
+    ref.current = handler
+  })
+  useEffect(() => telemetry.subscribe(topic, (payload) => ref.current(payload)), [topic])
+}
 
 /**
  * Refetch queries under `queryKey` whenever `topic` reports a change. The socket is a signal,

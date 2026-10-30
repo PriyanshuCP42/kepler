@@ -481,6 +481,11 @@ async def _queue(state: Any, ids: list[int]) -> None:
     await state.optimizer.notify()
 
 
+async def requeue(state: Any, ids: list[int]) -> None:
+    """Queue tasks again as Run would. The Conductor restarts infrastructure failures with it."""
+    await _queue(state, ids)
+
+
 @router.post("/run-all")
 async def run_all(state: State) -> LabTasks:
     """Run every task not started yet, oldest first. What does not fit waits its turn."""

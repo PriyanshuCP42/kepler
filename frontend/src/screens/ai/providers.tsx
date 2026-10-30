@@ -255,7 +255,7 @@ function AddKeyDialog({
             {provider.paid && (
               <Field
                 label="Daily request cap"
-                hint="Alpha Harness stops at this many requests a day on this key, and starts again when each model's day resets. You can change it later."
+                hint="Signal Foundry stops at this many requests a day on this key, and starts again when each model's day resets. You can change it later."
               >
                 <Input
                   type="number"

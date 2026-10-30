@@ -24,6 +24,12 @@ const index = createRoute({
   },
 })
 
+const hq = createRoute({
+  getParentRoute: () => root,
+  path: '/hq',
+  component: lazyRouteComponent(() => import('@/screens/hq'), 'HqScreen'),
+})
+
 const dashboard = createRoute({
   getParentRoute: () => root,
   path: '/dashboard',
@@ -211,6 +217,7 @@ const pyramids = createRoute({
 
 const routeTree = root.addChildren([
   index,
+  hq,
   dashboard,
   matrix,
   data,

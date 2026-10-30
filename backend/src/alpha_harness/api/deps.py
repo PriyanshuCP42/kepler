@@ -187,7 +187,7 @@ def install_exception_handlers(app: FastAPI) -> None:
         return _problem(
             500,
             "internal_error",
-            "Alpha Harness hit an unexpected error.",
+            "Signal Foundry hit an unexpected error.",
             detail=f"{type(exc).__name__}: {exc}"[:500],
         )
 

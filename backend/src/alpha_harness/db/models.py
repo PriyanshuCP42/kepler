@@ -235,6 +235,34 @@ class DedupEntry(Base):
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
 
 
+class CriticVerdict(Base):
+    """What the Critic made of one finished alpha, and where the Family Clerk placed it.
+
+    Keyed by BRAIN's alpha id, so scoring the same alpha again replaces its row. ``gates``
+    holds each gate's result (``ok`` true, false or null when it could not be judged yet),
+    its value and a sentence; ``reasons`` lists what failed, in plain words.
+    """
+
+    __tablename__ = "critic_verdict"
+    __table_args__ = (Index("ix_critic_verdict_verdict_score", "verdict", "score"),)
+
+    alpha_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    #: pass | near_miss | fail | unjudged
+    verdict: Mapped[str] = mapped_column(String(12), index=True)
+    score: Mapped[float] = mapped_column(Float, default=0.0)
+    gates: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    reasons: Mapped[list[Any]] = mapped_column(default=list)
+    region: Mapped[str | None] = mapped_column(String(16))
+    delay: Mapped[int | None] = mapped_column(Integer)
+    universe: Mapped[str | None] = mapped_column(String(32))
+    #: The alpha leading this one's family; its own id when it leads.
+    family_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    #: Highest daily-PnL correlation with any submitted alpha.
+    pool_correlation: Mapped[float | None] = mapped_column(Float)
+    family_checked_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+    scored_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
+
+
 class TaskQuota(Base):
     """How many of the concurrent slots a named task may hold at once.
 
@@ -278,6 +306,34 @@ class QuotaSnapshot(Base):
     remaining: Mapped[int | None] = mapped_column(Integer)
     reset_seconds: Mapped[float | None] = mapped_column(Float)
     observed_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow, index=True)
+
+
+class QuotaReservation(Base):
+    """Simulation quota set aside before a send, and what became of it.
+
+    ``RESERVED`` units count against the day immediately. A send whose outcome cannot be
+    determined is ``UNCERTAIN``, which still counts: it is never quietly released. Only an
+    explicit release (nothing was sent) or a reconcile frees it.
+    """
+
+    __tablename__ = "quota_reservation"
+    __table_args__ = (Index("ix_quota_reservation_day_state", "day", "state"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    #: Idempotency key: asking twice for the same send returns the first reservation.
+    token: Mapped[str] = mapped_column(String(128), unique=True)
+    #: Who asked: a task, a lab or an agent role. Budgets are kept per owner.
+    owner: Mapped[str] = mapped_column(String(64), index=True)
+    units: Mapped[int] = mapped_column(Integer)
+    #: Quota units actually charged, once known.
+    actual_units: Mapped[int | None] = mapped_column(Integer)
+    #: RESERVED | CONFIRMED | RELEASED | UNCERTAIN
+    state: Mapped[str] = mapped_column(String(12), default="RESERVED")
+    #: The platform's calendar day (America/New_York) the quota resets on, ISO.
+    day: Mapped[str] = mapped_column(String(10))
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
+    settled_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
 
 
 class BrainCache(Base):
@@ -486,6 +542,12 @@ class Trial(Base):
         UniqueConstraint("study_id", "number", name="uq_trial_number"),
         Index("ix_trial_open", "study_id", "state"),
     )
+
+
+# A trial row carries its whole search space and runs to hundreds of kilobytes, so reading
+# ``message`` from the table means paging through every row's overflow. The Tasks list counts
+# the trials answered for free by exactly these columns; this index answers it alone.
+Index("ix_trial_progress", Trial.study_id, Trial.state, Trial.message)
 
 
 # --- conversations --------------------------------------------------------

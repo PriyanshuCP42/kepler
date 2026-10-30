@@ -75,7 +75,7 @@ function CompetitionCard({ competition: c }: { competition: Competition }) {
         </div>
         {signUpOpen && (
           <p className="text-body text-ink-subtle">
-            Sign up on BRAIN by {fmt.date(c.signUpEndDate)} for your Alphas to count. Alpha Harness
+            Sign up on BRAIN by {fmt.date(c.signUpEndDate)} for your Alphas to count. Signal Foundry
             never signs up for you.
           </p>
         )}

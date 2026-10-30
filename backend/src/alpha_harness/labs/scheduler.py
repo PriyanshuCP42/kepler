@@ -11,6 +11,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 import structlog
+from pydantic import ValidationError
 from sqlalchemy import String, func, not_, or_, select, type_coerce, update
 
 from ..brain.platform import MULTI_SIMULATION_SIZE
@@ -135,7 +136,12 @@ scheduling = asyncio.Lock()
 
 
 def cores_of(row: Study) -> int:
-    return task_params(row).cores
+    try:
+        return task_params(row).cores
+    except ValidationError:
+        # A row from another build of the app may lack what its lab now requires; it can
+        # still be listed, and its stored cores are all the scheduler needs.
+        return int((row.sampler_params or {}).get("cores", 1))
 
 
 def to_start(waiting: list[tuple[int, int]], used: int, slots: int) -> list[int]:

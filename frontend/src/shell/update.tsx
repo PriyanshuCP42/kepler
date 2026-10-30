@@ -64,8 +64,8 @@ function Installing({ version }: { version: string }) {
       <p className="text-title text-ink">Installing {version}</p>
       <p className="max-w-prose text-body text-ink-subtle">
         {stuck
-          ? 'This is taking longer than it should. Close this window and start Alpha Harness again — the update is applied on the way back up.'
-          : 'Alpha Harness is closing, installing the new version and starting again. This page reloads itself when it is ready.'}
+          ? 'This is taking longer than it should. Close this window and start Signal Foundry again — the update is applied on the way back up.'
+          : 'Signal Foundry is closing, installing the new version and starting again. This page reloads itself when it is ready.'}
       </p>
     </div>
   )
@@ -102,7 +102,7 @@ export function InstallingOverlay() {
   if (closed)
     return (
       <div className="fixed inset-0 z-100 flex flex-col items-center justify-center gap-3 bg-canvas/95 p-6 text-center">
-        <p className="text-title text-ink">Alpha Harness is closed</p>
+        <p className="text-title text-ink">Signal Foundry is closed</p>
         <p className="max-w-prose text-body text-ink-subtle">
           Queued simulations wait until you open it again, the same way you opened it this time. You
           can close this tab.
@@ -252,7 +252,7 @@ function LauncherNotice({
         }
       >
         <p className="text-body-compact text-ink-subtle">
-          Alpha Harness updates itself, but it cannot replace the program that starts it. Download{' '}
+          Signal Foundry updates itself, but it cannot replace the program that starts it. Download{' '}
           <span className="num">{file}</span> from the release, quit this one, then install and open
           the new one. Nothing you have is lost — your data, alphas and sign-in all stay. If you had
           the old <span className="num">AlphaHarness</span> program, or a shortcut you made to it,
@@ -307,7 +307,7 @@ export function UpdateBadge({ collapsed = false }: { collapsed?: boolean }) {
       <Dialog
         open={open}
         onOpenChange={setOpen}
-        title={`Alpha Harness ${data.latest}`}
+        title={`Signal Foundry ${data.latest}`}
         description={`You are running ${data.current}.`}
         footer={
           <>
@@ -343,7 +343,7 @@ export function UpdateBadge({ collapsed = false }: { collapsed?: boolean }) {
           {apply.isError && <ErrorNotice error={apply.error} title="The update did not start" />}
           {!data.canInstall && (
             <p className="text-body-compact text-ink-subtle">
-              This copy was not started by the Alpha Harness launcher, so it cannot update itself.
+              This copy was not started by the Signal Foundry launcher, so it cannot update itself.
               Install the new version the way you installed this one.
             </p>
           )}
@@ -354,7 +354,7 @@ export function UpdateBadge({ collapsed = false }: { collapsed?: boolean }) {
           )}
           {data.canInstall && (
             <p className="text-body-compact text-ink-subtle">
-              Alpha Harness closes, installs the new version and opens again. Simulations already
+              Signal Foundry closes, installs the new version and opens again. Simulations already
               running on BRAIN keep going and are picked up on the way back.
             </p>
           )}
