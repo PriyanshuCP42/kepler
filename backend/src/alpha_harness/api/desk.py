@@ -45,6 +45,9 @@ router = APIRouter(prefix="/api/desk", tags=["desk"])
 #: Candidates the desk weighs, best Critic score first.
 CANDIDATES = 40
 WHOLE = "all"
+#: Every submitted Power Pool Alpha, whatever its region: what Combined Power Pool Alpha
+#: Performance combines.
+POWER = "Power Pool"
 
 Readiness = Literal["ready", "check", "hurts", "fading", "overfit", "blocked"]
 
@@ -147,6 +150,10 @@ class Desk(Out):
     pool_years: list[YearSharpe]
     recent_from: int
     recent_to: int
+    #: Submitting every Ready candidate together: your whole pool, then your Power Pool
+    #: Alphas, before and after. The nearest to Genius's two performance bars Kepler can see.
+    ready_ids: list[str] = Field(default_factory=list)
+    ready_impact: list[Effect] = Field(default_factory=list)
 
 
 def partition_of(region: Any, delay: Any, power: bool) -> str:
@@ -310,10 +317,13 @@ async def desk(state: State) -> Desk:
 
     members = await state.alphas.submitted_members()
     scopes: dict[str, list[str]] = {WHOLE: [str(m["alpha_id"]) for m in members]}
+    scopes[POWER] = []
     for m in members:
         power = POWER_POOL_CLASS in json_list(m.get("classifications"))
         name = partition_of(m["region"], m["delay"], power)
         scopes.setdefault(name, []).append(str(m["alpha_id"]))
+        if power:
+            scopes[POWER].append(str(m["alpha_id"]))
 
     powered = {v.alpha_id: power_pool.is_power_pool(stored[v.alpha_id]) for v in chosen}
     joins = {
@@ -322,6 +332,7 @@ async def desk(state: State) -> Desk:
             partition_of(
                 stored[v.alpha_id]["region"], stored[v.alpha_id]["delay"], powered[v.alpha_id]
             ),
+            *([POWER] if powered[v.alpha_id] else []),
         ]
         for v in chosen
     }
@@ -399,6 +410,8 @@ async def desk(state: State) -> Desk:
             )
         )
     out.sort(key=_rank, reverse=True)
+    ready = [c.alpha_id for c in out if c.readiness == "ready"]
+    basket = await asyncio.to_thread(_basket, series, meta, scopes, ready, powered)
     return Desk(
         candidates=out,
         submitted=len(scopes[WHOLE]),
@@ -410,7 +423,39 @@ async def desk(state: State) -> Desk:
         ],
         recent_from=guard.RECENT_YEARS[0],
         recent_to=guard.RECENT_YEARS[-1],
+        ready_ids=ready,
+        ready_impact=basket,
     )
+
+
+def _basket(
+    series: dict[str, dict[date, tuple[float, float]]],
+    meta: dict[str, dict[str, Any]],
+    scopes: dict[str, list[str]],
+    ready: list[str],
+    powered: dict[str, bool],
+) -> list[Effect]:
+    """Your whole pool and your Power Pool Alphas before and after every Ready one joins."""
+    out: list[Effect] = []
+    for scope, adding in ((WHOLE, ready), (POWER, [a for a in ready if powered.get(a)])):
+        members = scopes.get(scope, [])
+        before = portfolio.combined(series, meta, members, guard.RECENT_START)
+        after = (
+            portfolio.combined(series, meta, [*members, *adding], guard.RECENT_START)
+            if adding
+            else before
+        )
+        out.append(
+            Effect(
+                scope=scope,
+                members=len(members),
+                before=_figures(before["all"]),
+                after=_figures(after["all"]),
+                recent_before=_figures(before["recent"]),
+                recent_after=_figures(after["recent"]),
+            )
+        )
+    return out
 
 
 def _guard_view(

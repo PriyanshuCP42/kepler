@@ -168,6 +168,33 @@ def what_if(
     return out
 
 
+def combined(
+    series: dict[str, dict[date, tuple[float, float]]],
+    meta: dict[str, dict[str, Any]],
+    alpha_ids: list[str],
+    since: date | None = None,
+) -> dict[str, dict[str, Any] | None]:
+    """These Alphas combined as :func:`compute` combines them: their in-sample figures as
+    ``all``, and over the days from ``since`` as ``recent``."""
+    ids = [a for a in dict.fromkeys(alpha_ids) if series.get(a)]
+    if not ids:
+        return {"all": None, "recent": None}
+    dates, pnl, turnover = exported(*frame(series, meta, ids))
+    filled = np.nan_to_num(pnl)
+    started = np.maximum.accumulate((filled != 0) | (turnover != 0), axis=0)
+    live = np.maximum(started.sum(axis=1), 1)
+    book, traded = filled.sum(axis=1) / live, turnover.sum(axis=1) / live
+    found = metrics.stats(book, traded)
+    late = None
+    if since is not None:
+        cut = np.array(dates, dtype="datetime64[D]") >= np.datetime64(since, "D")
+        late = metrics.stats(book[cut], traded[cut], trim=False)
+    return {
+        "all": None if found is None else asdict(found),
+        "recent": None if late is None else asdict(late),
+    }
+
+
 def highest_correlations(ids: list[str], framed: Framed) -> dict[str, float | None]:
     """Each Alpha's highest correlation with any other of ``ids``, measured as the grid below
     measures it. ``framed`` is their :func:`frame`."""

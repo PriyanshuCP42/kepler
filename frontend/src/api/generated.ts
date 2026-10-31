@@ -3589,6 +3589,10 @@ export interface components {
             poolYears: components["schemas"]["YearSharpe"][];
             /** Prodceiling */
             prodCeiling: number;
+            /** Readyids */
+            readyIds?: string[];
+            /** Readyimpact */
+            readyImpact?: components["schemas"]["Effect"][];
             /** Recentfrom */
             recentFrom: number;
             /** Recentto */

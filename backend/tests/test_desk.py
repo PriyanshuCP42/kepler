@@ -75,3 +75,36 @@ def test_what_if_reports_the_recent_years_too():
     effect = found["c"][WHOLE]
     assert effect["recent_before"] is not None
     assert effect["recent_after"]["days"] < effect["after"]["days"]
+
+
+def test_combined_matches_the_what_if():
+    series = {"a": _series(1, days=900), "b": _series(2, days=900), "c": _series(3, days=900)}
+    since = date(2023, 1, 1)
+    joined = portfolio.combined(series, {}, ["a", "b", "c"], since)
+    found = portfolio.what_if(series, {}, {WHOLE: ["a", "b"]}, {"c": [WHOLE]}, since)
+    assert joined["all"]["sharpe"] == pytest.approx(found["c"][WHOLE]["after"]["sharpe"])
+    assert joined["recent"]["sharpe"] == pytest.approx(found["c"][WHOLE]["recent_after"]["sharpe"])
+
+
+def test_combined_of_nothing_is_empty():
+    assert portfolio.combined({}, {}, ["x"]) == {"all": None, "recent": None}
+
+
+def test_the_ready_basket_moves_both_bars():
+    from alpha_harness.api.desk import POWER, _basket
+
+    series = {k: _series(i, days=900) for i, k in enumerate(["a", "b", "c", "d"], start=1)}
+    scopes = {WHOLE: ["a", "b"], POWER: ["b"]}
+    found = _basket(series, {}, scopes, ["c", "d"], {"c": True, "d": False})
+    whole, power = found
+    assert (whole.scope, whole.members, power.scope, power.members) == (WHOLE, 2, POWER, 1)
+    assert whole.after != whole.before
+    assert power.after != power.before
+
+
+def test_an_empty_basket_changes_nothing():
+    from alpha_harness.api.desk import POWER, _basket
+
+    series = {"a": _series(1, days=900)}
+    found = _basket(series, {}, {WHOLE: ["a"], POWER: []}, [], {})
+    assert found[0].after == found[0].before

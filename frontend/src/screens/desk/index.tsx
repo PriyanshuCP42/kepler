@@ -45,6 +45,13 @@ import {
 
 const POLL_MS = 60_000
 const WHOLE = 'all'
+const POWER = 'Power Pool'
+/** Genius's two performance bars, by level, as your Genius page shows them. */
+const GENIUS_BARS = [
+  ['Expert', 0.5],
+  ['Master', 1],
+  ['Grandmaster', 2],
+] as const
 
 const READINESS: Record<Readiness, { label: string; tone: Tone; note: string }> = {
   ready: {
@@ -151,6 +158,11 @@ export function DeskScreen() {
         <Skeleton className="h-96" label="Weighing candidates" />
       ) : (
         <>
+          <ReadyImpact
+            impact={data.readyImpact}
+            ready={data.readyIds}
+            span={`${data.recentFrom ?? 2021}–${data.recentTo ?? 2023}`}
+          />
           <PoolYears years={data.poolYears} from={data.recentFrom} to={data.recentTo} />
           <Summary candidates={data.candidates} submitted={data.submitted} />
           <CandidatesPanel
@@ -197,7 +209,57 @@ function Summary({ candidates, submitted }: { candidates: Candidate[]; submitted
 }
 
 function effectOf(c: Candidate, whole: boolean): Effect | undefined {
-  return c.effects.find((e) => (e.scope === WHOLE) === whole)
+  return c.effects.find((e) => (whole ? e.scope === WHOLE : e.scope !== WHOLE && e.scope !== POWER))
+}
+
+function ReadyImpact({
+  impact,
+  ready,
+  span,
+}: {
+  impact: Effect[] | undefined
+  ready: string[] | undefined
+  span: string
+}) {
+  if (!impact?.length) return null
+  const rows: [string, string, Effect | undefined][] = [
+    [
+      'Combined Alpha Performance',
+      'All your submitted alphas',
+      impact.find((e) => e.scope === WHOLE),
+    ],
+    [
+      'Combined Power Pool Alpha Performance',
+      'Your Power Pool alphas',
+      impact.find((e) => e.scope === POWER),
+    ],
+  ]
+  const count = ready?.length ?? 0
+  return (
+    <Panel
+      title={count ? `If You Submit All ${count} Ready Alphas` : 'Your Genius Performance Bars'}
+      description={`Estimated from the combined Sharpe of your pool in ${span}, the nearest years to the hidden ones BRAIN scores (from 2024). BRAIN's own figure differs and is the one that counts: check your Genius page a few weeks after submitting. Bars: ${GENIUS_BARS.map(([name, bar]) => `${name} ${bar}`).join(', ')}.`}
+    >
+      <div className="grid gap-3 lg:grid-cols-2">
+        {rows.map(([title, who, effect]) => (
+          <div key={title} className="rounded border border-hairline px-3 py-2.5">
+            <div className="text-body font-medium text-ink">{title}</div>
+            <div className="text-caption text-ink-subtle">
+              {who} · {fmt.int(effect?.members ?? 0)} now
+              {count ? ` · ${ready?.join(', ')}` : ''}
+            </div>
+            <div className="mt-2 text-body">
+              <span className="text-caption text-ink-subtle">{span}: </span>
+              <Change effect={effect} recent />
+            </div>
+            <div className="text-caption text-ink-subtle">
+              all years: <Change effect={effect} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  )
 }
 
 function PoolYears({
@@ -298,7 +360,18 @@ function CandidatesPanel({ candidates, span }: { candidates: Candidate[]; span: 
                 <th className="px-4 py-2 text-right font-medium">Pool Corr</th>
                 <th className="px-4 py-2 text-right font-medium">Prod Corr</th>
                 <th className="px-4 py-2 font-medium">Neighbours</th>
-                <th className="px-4 py-2 font-medium">Your Pool Sharpe {span}</th>
+                <th
+                  className="px-4 py-2 font-medium"
+                  title="Your whole pool's combined Sharpe, before and after"
+                >
+                  Combined Alpha Perf. {span}
+                </th>
+                <th
+                  className="px-4 py-2 font-medium"
+                  title="Your Power Pool alphas' combined Sharpe, before and after"
+                >
+                  Combined Power Pool {span}
+                </th>
                 <th className="px-4 py-2 font-medium">Partition Sharpe {span}</th>
                 <th className="px-4 py-2 font-medium">Pyramid</th>
               </tr>
@@ -370,6 +443,13 @@ function CandidatesPanel({ candidates, span }: { candidates: Candidate[]; span: 
                         </div>
                       </td>
                       <td className="px-4 py-2">
+                        {c.powerPool ? (
+                          <Change effect={c.effects.find((e) => e.scope === POWER)} recent />
+                        ) : (
+                          <span className="text-caption text-ink-subtle">not Power Pool</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2">
                         <Change effect={partition} recent />
                         {partition && (
                           <div className="text-caption text-ink-subtle">
@@ -395,7 +475,7 @@ function CandidatesPanel({ candidates, span }: { candidates: Candidate[]; span: 
                     </tr>
                     {expanded && (
                       <tr className="border-b border-hairline-subtle bg-surface-1">
-                        <td colSpan={10} className="px-4 py-3">
+                        <td colSpan={11} className="px-4 py-3">
                           <Details candidate={c} />
                         </td>
                       </tr>
@@ -552,8 +632,12 @@ function Details({ candidate }: { candidate: Candidate }) {
             <thead>
               <tr className="text-left text-caption text-ink-subtle">
                 <th className="py-1 pr-3 font-medium">
-                  {effect.scope === WHOLE ? 'Your whole pool' : effect.scope} (
-                  {fmt.int(effect.members)})
+                  {effect.scope === WHOLE
+                    ? 'Your whole pool'
+                    : effect.scope === POWER
+                      ? 'Your Power Pool alphas'
+                      : effect.scope}{' '}
+                  ({fmt.int(effect.members)})
                 </th>
                 <th className="py-1 pr-3 text-right font-medium">Now</th>
                 <th className="py-1 text-right font-medium">If submitted</th>

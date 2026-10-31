@@ -98,6 +98,10 @@ export interface Desk {
   poolYears: YearSharpe[]
   recentFrom: number
   recentTo: number
+  /** Submitting every Ready candidate together: your whole pool, then your Power Pool alphas,
+   *  before and after. Absent from a backend older than this screen. */
+  readyIds?: string[]
+  readyImpact?: Effect[]
 }
 
 export const DESK_KEY = ['desk'] as const
