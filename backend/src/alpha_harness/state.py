@@ -20,6 +20,7 @@ from .agents.bus import AgentBus
 from .agents.conductor import Conductor
 from .agents.critic import Critic
 from .agents.families import FamilyClerk
+from .agents.genius import GeniusSync
 from .agents.guard import Guard
 from .agents.hypothesis import HypothesisWriter
 from .agents.overlap import Overlap
@@ -166,6 +167,7 @@ class AppState:
         self.guard = Guard(self, self.agents)
         self.hypotheses = HypothesisWriter(self, self.agents)
         self.allocator = Allocator(self, self.agents)
+        self.genius = GeniusSync(self, self.agents)
 
         self._renew_lock = asyncio.Lock()
         self._last_session_check = float("-inf")
@@ -228,6 +230,7 @@ class AppState:
         await self.optimizer.start()
         await self.families.start()
         await self.screener.start()
+        await self.genius.start()
         await self.repair.start()
         await self.conductor.start()
         self._session_watch = asyncio.create_task(self._watch_session(), name="session-watch")
@@ -362,6 +365,7 @@ class AppState:
         await self.screener.stop()
         await self.repair.stop()
         await self.hypotheses.stop()
+        await self.genius.stop()
         await self.agents.stop()
         await self.optimizer.stop()
         await self.engine.stop()

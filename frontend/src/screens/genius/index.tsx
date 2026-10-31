@@ -5,7 +5,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { PlusIcon, Trash2Icon } from 'lucide-react'
+import { PlusIcon, RefreshCwIcon, Trash2Icon } from 'lucide-react'
 import { type FormEvent, useState } from 'react'
 import { toast } from 'sonner'
 import { errorMessage } from '@/api/http'
@@ -26,15 +26,39 @@ import {
 } from '@/ui/kit'
 
 export function GeniusScreen() {
+  const queryClient = useQueryClient()
   const query = useQuery({ queryKey: GENIUS_KEY, queryFn: geniusApi.get })
+  const sync = useMutation({
+    mutationFn: geniusApi.sync,
+    onSuccess: (view) => {
+      queryClient.setQueryData(GENIUS_KEY, view)
+      toast.success('Synced from BRAIN')
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  })
   const data = query.data
 
   return (
     <Page>
       <PageHeader
         title="Genius Tracker"
-        description="Your Genius figures over time, against what the Submission Desk estimated on the same days."
+        description={
+          data?.syncedAt
+            ? `Your Genius figures, synced from BRAIN ${fmt.ago(data.syncedAt)} and every ${data.syncHours ?? 6} hours, against what the Submission Desk estimated on the same days.`
+            : 'Your Genius figures, synced from BRAIN every few hours, against what the Submission Desk estimated on the same days.'
+        }
+        actions={
+          <Button variant="primary" loading={sync.isPending} onClick={() => sync.mutate()}>
+            <RefreshCwIcon />
+            Sync from BRAIN
+          </Button>
+        }
       />
+      {data?.syncError && (
+        <p className={cn('text-body-compact', TEXT_TONE.loss)}>
+          The last sync failed: {data.syncError}
+        </p>
+      )}
       {query.isError && !data ? (
         <ErrorNotice error={query.error} title="Could not load the Genius tracker" />
       ) : !data ? (
@@ -72,8 +96,8 @@ function BarsPanel({ data }: { data: GeniusView }) {
       title="Your Genius Bars"
       description={
         latest
-          ? `From your reading of ${fmt.date(latest.readOn)}. Every bar must clear a level for that level.`
-          : 'Add a reading from your Genius page to see where you stand.'
+          ? `${latest.level ? `Level ${latest.level}` : 'Your level'}${isNum(latest.rank) ? ` · rank ${fmt.int(latest.rank)}` : ''} · from ${latest.source === 'brain' ? 'BRAIN' : 'your reading'} of ${fmt.date(latest.readOn)}. Every bar must clear a level for that level.`
+          : 'Sync from BRAIN to see where you stand.'
       }
     >
       <table className="w-full text-body-compact">
@@ -167,8 +191,8 @@ function AddReading() {
 
   return (
     <Panel
-      title="Add a Reading"
-      description="Copy the figures from your Genius page on BRAIN. Add one every few days, and always a day or two after you submit, so each change can be matched to what you submitted."
+      title="Add a Reading by Hand"
+      description="Only needed when the sync cannot reach BRAIN, or to note a figure from another day. Synced readings arrive by themselves every few hours."
     >
       <form className="grid grid-cols-2 gap-3" onSubmit={submit}>
         <Field label="Date read">
@@ -324,7 +348,7 @@ function ReadingsPanel({ data }: { data: GeniusView }) {
     >
       {rows.length === 0 ? (
         <Empty title="No readings yet">
-          Open your Genius page on BRAIN and copy today's figures into Add a Reading.
+          Click Sync from BRAIN, or wait a minute after Kepler starts: it syncs by itself.
         </Empty>
       ) : (
         <div className="overflow-x-auto">
@@ -332,6 +356,7 @@ function ReadingsPanel({ data }: { data: GeniusView }) {
             <thead>
               <tr className="border-b border-hairline text-left text-caption uppercase tracking-wide text-ink-subtle">
                 <th className="px-4 py-2 font-medium">Date</th>
+                <th className="px-4 py-2 font-medium">From</th>
                 <th className="px-4 py-2 text-right font-medium">Combined</th>
                 <th className="px-4 py-2 text-right font-medium">Estimate</th>
                 <th className="px-4 py-2 text-right font-medium">Power Pool</th>
@@ -347,6 +372,10 @@ function ReadingsPanel({ data }: { data: GeniusView }) {
               {rows.map((r) => (
                 <tr key={r.id} className="border-b border-hairline-subtle last:border-0">
                   <td className="num px-4 py-2 text-ink">{fmt.date(r.readOn)}</td>
+                  <td className="px-4 py-2 text-body-compact text-ink-muted">
+                    {r.source === 'brain' ? 'BRAIN' : 'You'}
+                    {r.level && <span className="text-ink-subtle"> · {r.level}</span>}
+                  </td>
                   <td className="num px-4 py-2 text-right text-ink">{fmt.ratio(r.combined)}</td>
                   <td className="num px-4 py-2 text-right text-ink-muted">
                     {fmt.ratio(r.estimateCombined)}

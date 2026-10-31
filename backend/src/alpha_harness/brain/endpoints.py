@@ -278,6 +278,13 @@ class BrainEndpoints:
         r = await self.client.poll(f"/users/self/alphas/{alpha_id}/before-and-after-performance")
         return r.body if isinstance(r.body, dict) else {}
 
+    async def consultant_summary(self) -> dict[str, Any]:
+        """Your Genius figures, as BRAIN's own Genius page reads them: ``performance`` (level,
+        this quarter's and last quarter's signals, pyramids and combined performances) and
+        ``leaderboard`` (rank). Undocumented; found in the platform's own client."""
+        r = await self.client.request("GET", "/users/self/consultant/summary")
+        return r.body if isinstance(r.body, dict) else {}
+
     async def update_alpha(self, alpha_id: str, properties: dict[str, Any]) -> dict[str, Any]:
         """``PATCH /alphas/{id}``: name, category, color, tags, description. Never submits."""
         r = await self.client.request("PATCH", f"/alphas/{alpha_id}", json_body=properties)

@@ -2,9 +2,10 @@
 
 BRAIN scores Combined Alpha Performance on the days after the backtest, which it keeps hidden,
 so the Desk estimates it from the last backtest years (:data:`.guard.RECENT_YEARS`). Whether
-that estimate is any good can only be told against BRAIN's own figures. They are published on
-the Genius page alone, so you type them in now and then; this lines each reading up with what
-the estimate said that day, worked out again from the alphas submitted by then.
+that estimate is any good can only be told against BRAIN's own figures. :class:`GeniusSync`
+reads them from the endpoint BRAIN's own Genius page reads, every :data:`SYNC_HOURS` hours, as
+one reading a day; you can still type one in. Each reading is lined up with what the estimate
+said that day, worked out again from the alphas submitted by then.
 
 Between two readings, the alphas submitted in between moved both: BRAIN's figure by what BRAIN
 says, the estimate by what Kepler says. Once there are :data:`MIN_PAIRS` such steps, how often
@@ -14,18 +15,27 @@ the two moved the same way, and how closely, says how far to trust the Desk's ra
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import math
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
+import structlog
 from sqlalchemy import select
 
+from ..brain.filters import platform_midnight
 from ..brain.platform import POWER_POOL_CLASS
 from ..db.models import GeniusReading
 from ..tools import portfolio
 from ..vault.store import json_list
 from . import guard
+
+log = structlog.get_logger(__name__)
+
+#: How often the figures are read from BRAIN. They move with each submission and are
+#: recomputed by BRAIN about monthly, so a few times a day keeps up with both.
+SYNC_HOURS = 6.0
 
 #: Genius's bars by level: Expert, Master, Grandmaster.
 BARS: dict[str, tuple[float, float, float]] = {
@@ -191,6 +201,9 @@ def build(
                 "signals": reading.signals,
                 "pyramids": reading.pyramids,
                 "note": reading.note,
+                "source": reading.source or "you",
+                "level": reading.level,
+                "rank": reading.rank,
                 "estimateCombined": found.combined,
                 "estimatePowerPool": found.power_pool,
                 "alphas": found.alphas,
@@ -248,3 +261,91 @@ async def report(state: Any) -> Report:
     series = await state.alphas.series(ids)
     meta = await state.alphas.by_ids(ids)
     return await asyncio.to_thread(build, readings, members, series, meta)
+
+
+def _number(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return float(value)
+
+
+def _block(parent: dict[str, Any], key: str) -> dict[str, Any]:
+    value = parent.get(key)
+    return value if isinstance(value, dict) else {}
+
+
+def parse_summary(body: dict[str, Any]) -> dict[str, Any]:
+    """This quarter's figures from ``/users/self/consultant/summary``: a reading's fields.
+
+    A figure BRAIN has not computed yet reads ``None`` there, and stays ``None`` here.
+    """
+    performance = _block(body, "performance")
+    current = _block(performance, "current")
+    board = _block(body, "leaderboard")
+    signals, pyramids, rank = (
+        current.get("alphaCount"),
+        current.get("pyramidCount"),
+        board.get("rank"),
+    )
+    return {
+        "combined": _number(current.get("combinedAlphaPerformance")),
+        "power_pool": _number(current.get("combinedPowerPoolAlphaPerformance")),
+        "selected": _number(current.get("combinedSelectedAlphaPerformance")),
+        "osmosis": _number(current.get("combinedOsmosisPerformance")),
+        "signals": int(signals) if isinstance(signals, int | float) else None,
+        "pyramids": int(pyramids) if isinstance(pyramids, int | float) else None,
+        "level": current.get("geniusLevel") or performance.get("currentLevel"),
+        "rank": int(rank) if isinstance(rank, int | float) else None,
+    }
+
+
+class GeniusSync:
+    """Reads your Genius figures from BRAIN and keeps one synced reading per platform day."""
+
+    def __init__(self, state: Any, bus: Any) -> None:
+        self.state = state
+        self.bus = bus
+        self.synced_at: datetime | None = None
+        self.error: str | None = None
+        self._task: asyncio.Task[None] | None = None
+
+    async def start(self) -> None:
+        self._task = asyncio.create_task(self._run(), name="genius-sync")
+
+    async def stop(self) -> None:
+        if self._task is not None:
+            self._task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._task
+
+    async def _run(self) -> None:
+        await asyncio.sleep(60)  # after startup's own work
+        while True:
+            if self.state.auth.session.authenticated:
+                with contextlib.suppress(Exception):
+                    await self.sync()
+            await asyncio.sleep(SYNC_HOURS * 3600)
+
+    async def sync(self) -> GeniusReading:
+        """Read the figures now and store them as today's synced reading."""
+        try:
+            body = await self.state.endpoints.consultant_summary()
+        except Exception as exc:
+            self.error = str(exc)[:200]
+            log.warning("genius.sync_failed", exc_info=True)
+            raise
+        found = parse_summary(body)
+        today = platform_midnight().date()
+        async with self.state.db.session() as session:
+            row = await session.scalar(
+                select(GeniusReading).where(
+                    GeniusReading.read_on == today, GeniusReading.source == "brain"
+                )
+            )
+            if row is None:
+                row = GeniusReading(read_on=today, source="brain")
+                session.add(row)
+            for key, value in found.items():
+                setattr(row, key, value)
+        self.synced_at, self.error = datetime.now(UTC), None
+        return row

@@ -632,10 +632,10 @@ class Hypothesis(Base):
 
 
 class GeniusReading(Base):
-    """Your Genius figures as BRAIN's Genius page showed them on one day, typed in by you.
+    """Your Genius figures on one day: synced from BRAIN's Genius page, or typed in by you.
 
-    BRAIN publishes them nowhere Kepler can read, so they are entered by hand; set against
-    what was submitted when, they show whether the Submission Desk's estimate moves with them.
+    Set against what was submitted when, they show whether the Submission Desk's estimate
+    moves with BRAIN's own figures.
     """
 
     __tablename__ = "genius_reading"
@@ -648,6 +648,12 @@ class GeniusReading(Base):
     pyramids: Mapped[int | None] = mapped_column(Integer)
     note: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
+    #: ``brain`` when synced from BRAIN's Genius page, ``you`` when typed in.
+    source: Mapped[str] = mapped_column(String(8), default="you", server_default="you")
+    level: Mapped[str | None] = mapped_column(String(32))
+    rank: Mapped[int | None] = mapped_column(Integer)
+    selected: Mapped[float | None] = mapped_column(Float)
+    osmosis: Mapped[float | None] = mapped_column(Float)
 
 
 class TrialDistribution(Base):

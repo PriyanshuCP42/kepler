@@ -10,6 +10,10 @@ export interface Reading {
   signals: number | null
   pyramids: number | null
   note: string | null
+  /** `brain` when synced from BRAIN's Genius page, `you` when typed in. */
+  source?: 'brain' | 'you'
+  level?: string | null
+  rank?: number | null
   /** What the Desk's estimate said that day, from the alphas submitted by then. */
   estimateCombined: number | null
   estimatePowerPool: number | null
@@ -50,6 +54,10 @@ export interface GeniusView {
   levels: string[]
   today: { combined: number | null; powerPool: number | null; alphas: number } | null
   minPairs: number
+  /** Absent from a backend older than this screen. */
+  syncedAt?: string | null
+  syncError?: string | null
+  syncHours?: number
 }
 
 export interface NewReading {
@@ -66,5 +74,7 @@ export const GENIUS_KEY = ['genius'] as const
 export const geniusApi = {
   get: () => http.get<GeniusView>('/api/genius'),
   add: (body: NewReading) => http.post<GeniusView>('/api/genius', body),
+  /** Reads your Genius figures from BRAIN now, as today's reading. */
+  sync: () => http.post<GeniusView>('/api/genius/sync'),
   remove: (id: number) => http.del<GeniusView>(`/api/genius/${id}`),
 }

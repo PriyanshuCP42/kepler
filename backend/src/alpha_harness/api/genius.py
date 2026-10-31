@@ -22,6 +22,10 @@ class GeniusReadingOut(Out):
     signals: int | None
     pyramids: int | None
     note: str | None
+    #: ``brain`` when synced from BRAIN's Genius page, ``you`` when typed in.
+    source: str
+    level: str | None
+    rank: int | None
     #: What the Desk's estimate said that day, from the alphas submitted by then.
     estimate_combined: float | None
     estimate_power_pool: float | None
@@ -70,6 +74,10 @@ class GeniusView(Out):
     levels: list[str]
     today: GeniusToday | None
     min_pairs: int
+    #: The last time the figures were read from BRAIN, and why the last try failed.
+    synced_at: str | None
+    sync_error: str | None
+    sync_hours: float
 
 
 class NewReading(BaseModel):
@@ -122,7 +130,22 @@ async def view(state: State) -> GeniusView:
         levels=list(genius.LEVELS),
         today=GeniusToday.model_validate(asdict(found.today)) if found.today else None,
         min_pairs=genius.MIN_PAIRS,
+        synced_at=state.genius.synced_at.isoformat() if state.genius.synced_at else None,
+        sync_error=state.genius.error,
+        sync_hours=genius.SYNC_HOURS,
     )
+
+
+@router.post("/sync")
+async def sync(state: State) -> GeniusView:
+    """Read your Genius figures from BRAIN now, as its Genius page does, as today's reading."""
+    if not state.auth.session.authenticated:
+        raise refuse(409, "signed_out", "Sign in to BRAIN to sync your Genius figures.")
+    try:
+        await state.genius.sync()
+    except Exception as exc:
+        raise refuse(502, "sync_failed", f"BRAIN did not give your Genius figures: {exc}") from exc
+    return await view(state)
 
 
 @router.post("", status_code=201)

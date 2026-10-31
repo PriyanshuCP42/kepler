@@ -107,3 +107,40 @@ def test_the_quality_score_rewards_less_drawdown_and_turnover():
     assert worse is not None and worse["total"] < 0
     assert worse["parts"]["drawdown"] == -0.5  # capped
     assert quality_change(None, base) is None
+
+
+SUMMARY = {
+    "performance": {
+        "currentLevel": "GOLD",
+        "current": {
+            "geniusLevel": "GOLD",
+            "alphaCount": 6,
+            "pyramidCount": 3,
+            "combinedAlphaPerformance": -0.8,
+            "combinedPowerPoolAlphaPerformance": -0.4,
+            "combinedSelectedAlphaPerformance": None,
+            "combinedOsmosisPerformance": None,
+        },
+        "previous": {"alphaCount": 40},
+    },
+    "leaderboard": {"rank": 5000, "combinedSelectedAlphaPerformance": 0.0},
+}
+
+
+def test_parse_summary_reads_this_quarter():
+    found = genius.parse_summary(SUMMARY)
+    assert found == {
+        "combined": -0.8,
+        "power_pool": -0.4,
+        "selected": None,
+        "osmosis": None,
+        "signals": 6,
+        "pyramids": 3,
+        "level": "GOLD",
+        "rank": 5000,
+    }
+
+
+def test_parse_summary_survives_an_empty_answer():
+    found = genius.parse_summary({})
+    assert all(v is None for v in found.values())

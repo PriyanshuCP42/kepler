@@ -1202,6 +1202,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/genius/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sync
+         * @description Read your Genius figures from BRAIN now, as its Genius page does, as today's reading.
+         */
+        post: operations["sync_api_genius_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/genius/{reading_id}": {
         parameters: {
             query?: never;
@@ -4106,16 +4126,22 @@ export interface components {
             estimatePowerPool: number | null;
             /** Id */
             id: number;
+            /** Level */
+            level: string | null;
             /** Note */
             note: string | null;
             /** Powerpool */
             powerPool: number | null;
             /** Pyramids */
             pyramids: number | null;
+            /** Rank */
+            rank: number | null;
             /** Readon */
             readOn: string;
             /** Signals */
             signals: number | null;
+            /** Source */
+            source: string;
         };
         /** GeniusStep */
         GeniusStep: {
@@ -4162,6 +4188,12 @@ export interface components {
             readings: components["schemas"]["GeniusReadingOut"][];
             /** Steps */
             steps: components["schemas"]["GeniusStep"][];
+            /** Syncerror */
+            syncError: string | null;
+            /** Synchours */
+            syncHours: number;
+            /** Syncedat */
+            syncedAt: string | null;
             today: components["schemas"]["GeniusToday"] | null;
         };
         /** GuardRequest */
@@ -8699,6 +8731,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sync_api_genius_sync_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeniusView"];
                 };
             };
         };
