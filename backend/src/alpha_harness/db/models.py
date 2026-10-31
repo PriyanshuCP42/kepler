@@ -12,12 +12,13 @@ the ability to cancel a running simulation, which is the exact failure this proj
 exists to prevent.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from enum import StrEnum
 from typing import Any
 
 from sqlalchemy import (
     JSON,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -628,6 +629,25 @@ class Hypothesis(Base):
     )
     trial_from: Mapped[int | None] = mapped_column(Integer)
     trial_to: Mapped[int | None] = mapped_column(Integer)
+
+
+class GeniusReading(Base):
+    """Your Genius figures as BRAIN's Genius page showed them on one day, typed in by you.
+
+    BRAIN publishes them nowhere Kepler can read, so they are entered by hand; set against
+    what was submitted when, they show whether the Submission Desk's estimate moves with them.
+    """
+
+    __tablename__ = "genius_reading"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    read_on: Mapped[date] = mapped_column(Date, index=True)
+    combined: Mapped[float | None] = mapped_column(Float)
+    power_pool: Mapped[float | None] = mapped_column(Float)
+    signals: Mapped[int | None] = mapped_column(Integer)
+    pyramids: Mapped[int | None] = mapped_column(Integer)
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
 
 
 class TrialDistribution(Base):

@@ -1,4 +1,5 @@
 import {
+  AwardIcon,
   Building2Icon,
   ChartPieIcon,
   DatabaseIcon,
@@ -70,6 +71,12 @@ export const NAV = [
     group: '',
     label: 'Submission Desk',
     icon: SendIcon,
+  },
+  {
+    to: '/genius',
+    group: '',
+    label: 'Genius Tracker',
+    icon: AwardIcon,
   },
   {
     to: '/dashboard',

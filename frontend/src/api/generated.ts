@@ -1116,6 +1116,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/genius": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** View */
+        get: operations["view_api_genius_get"];
+        put?: never;
+        /**
+         * Add
+         * @description Store what your Genius page shows today. Any figure may be left out.
+         */
+        post: operations["add_api_genius_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/genius/{reading_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove */
+        delete: operations["remove_api_genius__reading_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -3954,6 +3992,94 @@ export interface components {
             /** Turnover */
             turnover: number;
         };
+        /** GeniusAgreement */
+        GeniusAgreement: {
+            /** Correlation */
+            correlation: number | null;
+            /** Pairs */
+            pairs: number;
+            /** Samedirection */
+            sameDirection: number;
+            /** Verdict */
+            verdict: string;
+        };
+        /** GeniusBar */
+        GeniusBar: {
+            /** Bars */
+            bars: number[];
+            /** Label */
+            label: string;
+            /** Level */
+            level: string | null;
+            /** Metric */
+            metric: string;
+            /** Value */
+            value: number | null;
+        };
+        /** GeniusReadingOut */
+        GeniusReadingOut: {
+            /** Alphas */
+            alphas: number;
+            /** Combined */
+            combined: number | null;
+            /** Estimatecombined */
+            estimateCombined: number | null;
+            /** Estimatepowerpool */
+            estimatePowerPool: number | null;
+            /** Id */
+            id: number;
+            /** Note */
+            note: string | null;
+            /** Powerpool */
+            powerPool: number | null;
+            /** Pyramids */
+            pyramids: number | null;
+            /** Readon */
+            readOn: string;
+            /** Signals */
+            signals: number | null;
+        };
+        /** GeniusStep */
+        GeniusStep: {
+            /** Braincombined */
+            brainCombined: number | null;
+            /** Brainpowerpool */
+            brainPowerPool: number | null;
+            /** Estimatecombined */
+            estimateCombined: number | null;
+            /** Estimatepowerpool */
+            estimatePowerPool: number | null;
+            /** Since */
+            since: string;
+            /** Submitted */
+            submitted: string[];
+            /** Until */
+            until: string;
+        };
+        /** GeniusToday */
+        GeniusToday: {
+            /** Alphas */
+            alphas: number;
+            /** Combined */
+            combined: number | null;
+            /** Powerpool */
+            powerPool: number | null;
+        };
+        /** GeniusView */
+        GeniusView: {
+            agreement: components["schemas"]["GeniusAgreement"];
+            /** Bars */
+            bars: components["schemas"]["GeniusBar"][];
+            /** Levels */
+            levels: string[];
+            /** Minpairs */
+            minPairs: number;
+            /** Readings */
+            readings: components["schemas"]["GeniusReadingOut"][];
+            /** Steps */
+            steps: components["schemas"]["GeniusStep"][];
+            today: components["schemas"]["GeniusToday"] | null;
+        };
         /** GuardRequest */
         GuardRequest: {
             /**
@@ -4490,6 +4616,24 @@ export interface components {
             testSharpe: number | null;
             /** Trainsharpe */
             trainSharpe: number | null;
+        };
+        /** NewReading */
+        NewReading: {
+            /** Combined */
+            combined?: number | null;
+            /** Note */
+            note?: string | null;
+            /** Powerpool */
+            powerPool?: number | null;
+            /** Pyramids */
+            pyramids?: number | null;
+            /**
+             * Readon
+             * Format: date
+             */
+            readOn: string;
+            /** Signals */
+            signals?: number | null;
         };
         /** NicheView */
         NicheView: {
@@ -8285,6 +8429,90 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AddedTask"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    view_api_genius_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeniusView"];
+                };
+            };
+        };
+    };
+    add_api_genius_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewReading"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeniusView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_api_genius__reading_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                reading_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeniusView"];
                 };
             };
             /** @description Validation Error */

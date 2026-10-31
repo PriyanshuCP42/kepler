@@ -35,6 +35,7 @@ from .api import (
     competitions,
     desk,
     ga,
+    genius,
     hypotheses,
     lab_tasks,
     llm,
@@ -181,6 +182,7 @@ def create_app() -> FastAPI:
     app.include_router(vault.router)
     app.include_router(portfolio.router)
     app.include_router(desk.router)
+    app.include_router(genius.router)
     app.include_router(hypotheses.router)
     app.include_router(quarter.router)
     app.include_router(tasks.router)
