@@ -170,10 +170,18 @@ class TestSubmissionCheck:
         assert readiness == "fails_check"
         assert "Power Pool description" in reasons[0]
 
-    def test_unchecked_waits_for_brain(self):
+    def test_unchecked_can_be_ready_with_a_caution(self):
         from alpha_harness.api.desk import submission_of
 
         unchecked = submission_of(None, None, [LOW_SHARPE_WARN])
         readiness, reasons = judge(0.3, 0.2, [], None, 1.5, unchecked)
-        assert readiness == "check"
-        assert any("may turn into a fail" in r for r in reasons)
+        assert readiness == "ready"
+        assert any("run Check Submission" in r for r in reasons)
+
+    def test_unchecked_without_warnings_has_no_caution(self):
+        from alpha_harness.api.desk import submission_of
+
+        unchecked = submission_of(None, None, [FITNESS_PASS])
+        readiness, reasons = judge(0.3, 0.2, [], None, 1.5, unchecked)
+        assert readiness == "ready"
+        assert not any("Check Submission" in r for r in reasons)

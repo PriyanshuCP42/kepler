@@ -346,7 +346,7 @@ def judge(
         failed = "; ".join(_check_text(c) for c in submission.failing)
         hint = (
             " It relies on the Power Pool route, which needs a Power Pool description of 100 "
-            "characters or more: write one on its Alpha page, then check again."
+            "characters or more: add one on its Alpha page, then check again."
             if submission.needs_description
             else " Repair it: the fixes aim at exactly these checks."
         )
@@ -379,22 +379,22 @@ def judge(
     if hurts:
         return "hurts", reasons
     pending = [] if prod is not None else ["Production Correlation not checked yet."]
-    if submission is not None and submission.status == "not_run":
+    # BRAIN's own submission check is the last step, run by you before submitting; until then
+    # what the simulation only warned on is passed on as a caution, not held against it.
+    caution: list[str] = []
+    if submission is not None and submission.status == "not_run" and submission.warned:
         warned = "; ".join(_check_text(c) for c in submission.warned)
-        pending.append(
-            "BRAIN's submission check not run yet"
-            + (
-                f": its simulation only warned on {warned}, which the check may turn into a fail."
-                if warned
-                else "."
-            )
+        caution.append(
+            f"Before submitting, run Check Submission: its simulation only warned on {warned}, "
+            "which BRAIN may refuse unless it qualifies as Power Pool (a description of 100 "
+            "characters or more)."
         )
     if view is not None and view.status in _GUARD_PENDING:
         pending.append(_GUARD_PENDING[view.status])
     if pending:
-        return "check", [*pending, *reasons]
+        return "check", [*pending, *caution, *reasons]
     held = [] if view is None else [f"{view.held} of {view.measured} neighbours held."]
-    return "ready", [f"Production Correlation {prod:.2f}.", *held, *reasons]
+    return "ready", [f"Production Correlation {prod:.2f}.", *held, *caution, *reasons]
 
 
 def describe(before: Figures, after: Figures) -> str:
@@ -720,7 +720,8 @@ async def guard_task(body: GuardRequest, state: State) -> GuardTask:
 @router.post("/submission-check", status_code=202)
 async def submission_check(state: State) -> WorkflowStarted:
     """Run BRAIN's submission check, as its Check Submission button does, on every candidate
-    worth it that has not had one: Ready and Check First. In the background; no quota."""
+    worth it that has not had one: Ready and Check First. Optional, the last step before
+    submitting; in the background, no quota and no LLM."""
     from .alphas import check_alpha
 
     found = await desk(state)
@@ -775,86 +776,3 @@ async def repair_failing(body: RepairFailing, state: State) -> RepairWritten:
     if added is None:
         raise refuse(409, "nothing_to_repair", "No candidate fails BRAIN's submission check.")
     return RepairWritten(id=added.id, name=added.name, alphas=len(ids))
-
-
-#: BRAIN's POWER_POOL_DESCRIPTION_LENGTH limit: a shorter description counts as none.
-DESCRIPTION_LENGTH = 100
-
-
-def needs_writing(candidate: Candidate) -> bool:
-    """A Power Pool candidate worth describing: one BRAIN has not passed yet, that it may only
-    take through the Power Pool route."""
-    return (
-        candidate.power_pool
-        and candidate.readiness in ("ready", "check", "fails_check")
-        and (candidate.submission is None or candidate.submission.status != "passes")
-    )
-
-
-@router.post("/describe", status_code=202)
-async def write_descriptions(state: State) -> WorkflowStarted:
-    """Write and save a Power Pool description for every Power Pool candidate BRAIN has not
-    passed, then run its submission check again. In the background. Uses the description
-    model chosen in Settings; no simulation quota. An existing description of 100 characters
-    or more is kept, and so are the alpha's name, category, colour and tags."""
-    from fastapi import HTTPException
-
-    from .alphas import AlphaProperties, check_alpha, update_properties, write_description
-
-    found = await desk(state)
-    wanted = [c.alpha_id for c in found.candidates if needs_writing(c)]
-    if not wanted:
-        raise refuse(409, "nothing_to_describe", "No Power Pool candidate needs a description.")
-
-    async def work(task: Any) -> str:
-        written = kept = failed = 0
-        passing: list[str] = []
-        for done, alpha_id in enumerate(wanted):
-            await state.tasks.update(
-                task, progress=done / len(wanted), detail=f"{done} of {len(wanted)}"
-            )
-            try:
-                body = await state.endpoints.alpha_body(alpha_id)
-                regular = body.get("regular") if isinstance(body.get("regular"), dict) else {}
-                current = str((regular or {}).get("description") or "")
-                if len(current.strip()) >= DESCRIPTION_LENGTH:
-                    kept += 1
-                else:
-                    answer = await write_description(alpha_id, state)
-                    await update_properties(
-                        alpha_id,
-                        AlphaProperties(
-                            name=body.get("name"),
-                            category=body.get("category"),
-                            color=body.get("color"),
-                            tags=[t for t in body.get("tags") or [] if isinstance(t, str)],
-                            description=answer.description,
-                        ),
-                        state,
-                    )
-                    written += 1
-                checked = await check_alpha(alpha_id, state)
-                verdict = submission_of(checked.root, None, [])
-                if verdict.status == "passes":
-                    passing.append(alpha_id)
-            except HTTPException as exc:
-                # No model to write with: every other alpha would fail the same way.
-                detail = exc.detail if isinstance(exc.detail, dict) else {}
-                if detail.get("code") == "no_api_key":
-                    raise RuntimeError(str(detail.get("message") or exc.detail)) from exc
-                failed += 1
-            # One alpha BRAIN or the model cannot handle must not stop the rest.
-            except Exception:  # noqa: BLE001
-                failed += 1
-        parts = [f"{written} descriptions written", f"{len(passing)} now pass BRAIN's check"]
-        if kept:
-            parts.append(f"{kept} already described")
-        if failed:
-            parts.append(f"{failed} could not be done")
-        return "; ".join(parts)
-
-    try:
-        started = await state.backfill.start_job("pp-descriptions", "Power Pool descriptions", work)
-    except RuntimeError as exc:
-        raise refuse(409, "already_running", str(exc)) from exc
-    return WorkflowStarted(task_id=started)

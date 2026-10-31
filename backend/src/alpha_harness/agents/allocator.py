@@ -13,7 +13,9 @@ written off. Each day's split is a Thompson draw from those posteriors, seeded b
 day so the plan shown is the plan written, with :data:`EXPLORE` of the budget kept for each arm
 that can take it so a lab that improves gets noticed. An arm takes no more than it can use (a
 repair task is as big as the near misses waiting); what it cannot use goes to the Search Lab,
-which can always take more. The Template Lab needs your template, so its share is a suggestion.
+which can always take more. The Template Lab needs your template, so its share is a
+suggestion; so is the Hypothesis Writer's when no hypotheses are waiting, since writing them
+spends your LLM's quota.
 
 Budget: the day's operating ceiling, less what was sent today, what running tasks will still
 send, and what tasks written today but not started would. Neighbour checks for the Submission
@@ -271,8 +273,12 @@ class Allocator:
             if tested is not None:
                 task, _ = tested
                 written.append({"id": task.id, "name": task.name, "arm": HYPOTHESIS})
-        if not hypothesis.capacity and self.state.hypotheses.write_in_background():
-            notes.append("No hypotheses were waiting, so the Hypothesis Writer is writing some.")
+        if not hypothesis.capacity:
+            # Writing them spends your LLM's quota, so it is yours to start, not the plan's.
+            notes.append(
+                "No hypotheses are waiting: write some in Autopilot if you want the Hypothesis "
+                "Writer's share (it uses your LLM)."
+            )
 
         search = by[SEARCH]
         if search.planned >= SEARCH_PER_NICHE:
@@ -380,7 +386,7 @@ class Allocator:
         by[HYPOTHESIS].note = (
             f"{len(ready)} hypotheses waiting"
             if ready
-            else "None waiting: the plan asks the Hypothesis Writer for more"
+            else "None waiting: write some in Autopilot (uses your LLM)"
         )
         by[TEMPLATE].manual = True
         by[TEMPLATE].note = "Needs your template, so its share is a suggestion"
