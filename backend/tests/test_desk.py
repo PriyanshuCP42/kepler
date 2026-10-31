@@ -56,6 +56,12 @@ class TestVerdict:
     def test_lowering_the_pool_hurts(self):
         assert judge(0.3, 0.2, self._lifts(1.2, 1.0))[0] == "hurts"
 
+    def test_a_small_partition_cannot_hold_back_a_pool_lift(self):
+        partition = Effect(
+            scope="EUR · D1 · Power Pool", members=1, before=_figures(1.2), after=_figures(1.0)
+        )
+        assert judge(0.3, 0.2, [*self._lifts(), partition])[0] == "ready"
+
     def test_unchecked_production_correlation_is_checked_first(self):
         assert judge(None, 0.2, self._lifts())[0] == "check"
 

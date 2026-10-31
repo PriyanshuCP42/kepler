@@ -493,7 +493,9 @@ def judge(
             + describe(before, after)
             + "."
         )
-        hurts = hurts or effect.impact.total < 0
+        # BRAIN scores the whole pool and the Power Pool; a partition, often of one or two
+        # alphas, is shown but cannot hold back an alpha that lifts both.
+        hurts = hurts or (effect.scope in (WHOLE, POWER) and effect.impact.total < 0)
     doubts = overfitting(view, test_sharpe) if view is not None else []
     if doubts:
         return "overfit", [*doubts, *reasons]
