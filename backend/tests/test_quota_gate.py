@@ -236,3 +236,15 @@ async def test_endpoint_cannot_be_sent_around_the_gate(db) -> None:
     with pytest.raises(BrainDailyLimitReached):
         await ep.create_simulation([_request(), _request()])
     assert Client.posts == 0
+
+
+async def test_brain_count_replaces_a_higher_local_count(db) -> None:
+    g = gate(db)  # usable = 900
+    await g.authorize(token="a", owner="x", units=900)
+    # BRAIN, read after that send, says only 300 were charged: errors cost nothing there.
+    read_at = utcnow()
+    await g.authorize(token="b", owner="x", units=500, platform_used=(300, read_at))
+    # 300 by BRAIN plus 500 reserved since: 100 left.
+    with pytest.raises(Denied):
+        await g.authorize(token="c", owner="x", units=101, platform_used=(300, read_at))
+    await g.authorize(token="d", owner="x", units=100, platform_used=(300, read_at))

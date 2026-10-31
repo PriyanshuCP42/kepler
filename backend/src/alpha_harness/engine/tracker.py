@@ -13,7 +13,7 @@ it with the id the instant the response lands. A crash between the two leaves a
 import asyncio
 import contextlib
 import time
-from datetime import UTC
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import structlog
@@ -335,6 +335,19 @@ class SimulationTracker:
                 )
             )
         return int(total or 0)
+
+    async def platform_used_today(self) -> tuple[int, datetime] | None:
+        """BRAIN's own count of today's simulations and when it was read, from the newest
+        quota headers; ``None`` before today's first reading."""
+        latest = await self.latest_quota()
+        if latest is None or latest.limit_total is None or latest.remaining is None:
+            return None
+        read_at = latest.observed_at
+        if read_at.tzinfo is None:
+            read_at = read_at.replace(tzinfo=UTC)
+        if read_at < platform_midnight().astimezone(UTC):
+            return None
+        return latest.limit_total - latest.remaining, latest.observed_at
 
     async def latest_quota(self) -> QuotaSnapshot | None:
         async with self.db.session() as session:

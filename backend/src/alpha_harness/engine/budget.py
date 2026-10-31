@@ -124,6 +124,7 @@ class QuotaGate:
         units: int,
         observed_used: int = 0,
         use_reserve: bool = False,
+        platform_used: tuple[int, datetime] | None = None,
     ) -> Grant:
         """Reserve ``units`` for ``owner`` or raise :class:`Denied`. Idempotent per ``token``."""
         if not token or not owner:
@@ -144,7 +145,13 @@ class QuotaGate:
                         raise Denied("released", f"token {token} was released; use a new one")
                     return Grant(token, existing.units, existing.day, fresh=False)
 
-                spent = max(await self._committed_in(session, day), observed_used)
+                if platform_used is not None:
+                    # BRAIN's own count, read today, plus what was reserved since: it does
+                    # not charge for every send counted here, so a local count runs high.
+                    used, read_at = platform_used
+                    spent = used + await self._committed_in(session, day, since=read_at)
+                else:
+                    spent = max(await self._committed_in(session, day), observed_used)
                 limit = self.operating_ceiling - (0 if use_reserve else self.protected_reserve)
                 limit = min(limit, self.hard_cap)
                 if spent + units > limit:
@@ -170,7 +177,13 @@ class QuotaGate:
         return Grant(token, units, day, fresh=True)
 
     @staticmethod
-    async def _committed_in(session: AsyncSession, day: str, owner: str | None = None) -> int:
+    async def _committed_in(
+        session: AsyncSession,
+        day: str,
+        owner: str | None = None,
+        *,
+        since: datetime | None = None,
+    ) -> int:
         stmt = select(
             func.coalesce(
                 func.sum(func.coalesce(QuotaReservation.actual_units, QuotaReservation.units)), 0
@@ -178,6 +191,8 @@ class QuotaGate:
         ).where(QuotaReservation.day == day, QuotaReservation.state.in_(COUNTED))
         if owner is not None:
             stmt = stmt.where(QuotaReservation.owner == owner)
+        if since is not None:
+            stmt = stmt.where(QuotaReservation.created_at > since)
         return int(await session.scalar(stmt) or 0)
 
     async def settle(
@@ -217,6 +232,7 @@ class QuotaGate:
         *,
         owner: str = "engine",
         observed_used: Callable[[], Awaitable[int]] | None = None,
+        platform_used: Callable[[], Awaitable[tuple[int, datetime] | None]] | None = None,
     ) -> BrainResponse:
         """Send through the gate: reserve, send, then settle by what happened.
 
@@ -227,9 +243,12 @@ class QuotaGate:
         """
         units = self.units_for(payload)
         seen = await observed_used() if observed_used is not None else 0
+        platform = await platform_used() if platform_used is not None else None
         token = uuid.uuid4().hex
         try:
-            await self.authorize(token=token, owner=owner, units=units, observed_used=seen)
+            await self.authorize(
+                token=token, owner=owner, units=units, observed_used=seen, platform_used=platform
+            )
         except Denied as exc:
             log.warning("quota.denied", owner=owner, units=units, reason=exc.reason)
             raise BrainDailyLimitReached(f"Local quota gate refused the send: {exc}") from exc

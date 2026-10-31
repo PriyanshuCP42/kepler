@@ -116,7 +116,10 @@ class AppState:
             on_alpha=self._alpha_landed,
         )
         self.endpoints.quota_guard = lambda payload, send: self.quota_gate.guard(
-            payload, send, observed_used=self.tracker.used_today
+            payload,
+            send,
+            observed_used=self.tracker.used_today,
+            platform_used=self.tracker.platform_used_today,
         )
         self.engine = BatchEngine(
             self.db, self.endpoints, self.tracker, on_unauthorized=self.renew_session
