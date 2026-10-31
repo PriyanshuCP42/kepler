@@ -556,7 +556,7 @@ def _prod_key(alpha_id: str) -> str:
     return f"correlation:prod:{alpha_id}"
 
 
-async def _prod_correlations(
+async def prod_correlations(
     state: State, alpha_ids: list[str], checks: dict[str, list[dict[str, Any]]]
 ) -> dict[str, float]:
     """Production Correlation where BRAIN has given one: a kept answer from its correlation
@@ -590,7 +590,7 @@ async def check_prod_correlation(body: AlphaIds, state: State) -> WorkflowStarte
     async def work(task: Task) -> str:
         stored = await state.alphas.by_ids(alpha_ids)
         checks = {a: checks_of(r.get("checks")) for a, r in stored.items()}
-        known = await _prod_correlations(state, list(stored), checks)
+        known = await prod_correlations(state, list(stored), checks)
         wanted = [
             a for a in alpha_ids if a in stored and not is_submitted(stored[a]) and a not in known
         ]
@@ -843,7 +843,7 @@ async def top(
     current = {a: checks_of(r.get("checks")) for a, r in stored.items() if r.get("checks")}
     # A region-agnostic parent is judged on its children, as BRAIN judges it.
     current |= await state.alphas.family_checks(stored)
-    prod = await _prod_correlations(state, list(stored), current)
+    prod = await prod_correlations(state, list(stored), current)
     # No download is started from here. Reading a page is not asking for one, and these are
     # three BRAIN requests per Alpha: enough of them earns a 429, which holds up every read of
     # an Alpha, captures included. Calculate After-Cost Sharpe is the way to ask, and it says
@@ -1040,7 +1040,7 @@ async def submittable_alphas(state: State) -> list[TaskAlpha]:
     current = {a: checks_of(r.get("checks")) for a, r in stored.items() if r.get("checks")}
     # A region-agnostic parent is judged on its children, as BRAIN judges it.
     current |= await state.alphas.family_checks(stored)
-    prod = await _prod_correlations(state, list(stored), current)
+    prod = await prod_correlations(state, list(stored), current)
     by_trial = {t.id: t.study_id for t in trials}
     out: list[TaskAlpha] = []
     seen: set[str] = set()

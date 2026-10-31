@@ -33,6 +33,7 @@ from .api import (
     catalog,
     chat,
     competitions,
+    desk,
     ga,
     lab_tasks,
     llm,
@@ -178,6 +179,7 @@ def create_app() -> FastAPI:
     app.include_router(llm.router)
     app.include_router(vault.router)
     app.include_router(portfolio.router)
+    app.include_router(desk.router)
     app.include_router(quarter.router)
     app.include_router(tasks.router)
     app.include_router(today.router)

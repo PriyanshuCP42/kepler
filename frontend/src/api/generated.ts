@@ -920,6 +920,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/desk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Desk
+         * @description The best unsubmitted Critic passes, one per family, with their effect on your pool.
+         */
+        get: operations["desk_api_desk_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/desk/prod-correlation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Candidates
+         * @description Ask BRAIN for the Production Correlation of every candidate it has not given one for.
+         *     BRAIN limits these per hour; no simulation quota.
+         */
+        post: operations["check_candidates_api_desk_prod_correlation_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/evolution-lab/options": {
         parameters: {
             query?: never;
@@ -2977,6 +3018,45 @@ export interface components {
             /** Cancelled */
             cancelled: boolean;
         };
+        /** Candidate */
+        Candidate: {
+            /** Alphaid */
+            alphaId: string;
+            /** Criticscore */
+            criticScore: number;
+            /** Delay */
+            delay: number | null;
+            /** Effects */
+            effects: components["schemas"]["Effect"][];
+            /** Expression */
+            expression: string | null;
+            /** Fitness */
+            fitness: number | null;
+            /** Poolcorrelation */
+            poolCorrelation: number | null;
+            /** Powerpool */
+            powerPool: boolean;
+            /** Prodcorrelation */
+            prodCorrelation: number | null;
+            pyramid: components["schemas"]["Pyramid"] | null;
+            /**
+             * Readiness
+             * @enum {string}
+             */
+            readiness: "ready" | "check" | "hurts" | "blocked";
+            /** Reasons */
+            reasons: string[];
+            /** Region */
+            region: string | null;
+            /** Sharpe */
+            sharpe: number | null;
+            /** Testsharpe */
+            testSharpe: number | null;
+            /** Trainsharpe */
+            trainSharpe: number | null;
+            /** Universe */
+            universe: string | null;
+        };
         /** CatalogCounts */
         CatalogCounts: {
             /** Categories */
@@ -3333,10 +3413,32 @@ export interface components {
             /** Value Score */
             value_score: number | null;
         };
+        /** Desk */
+        Desk: {
+            /** Candidates */
+            candidates: components["schemas"]["Candidate"][];
+            /** Prodceiling */
+            prodCeiling: number;
+            /** Selfceiling */
+            selfCeiling: number;
+            /** Submitted */
+            submitted: number;
+            /** Unmeasured */
+            unmeasured: number;
+        };
         /** DropResult */
         DropResult: {
             /** Dropped */
             dropped: number;
+        };
+        /** Effect */
+        Effect: {
+            after: components["schemas"]["Figures"] | null;
+            before: components["schemas"]["Figures"] | null;
+            /** Members */
+            members: number;
+            /** Scope */
+            scope: string;
         };
         /**
          * EngineStatus
@@ -3656,6 +3758,21 @@ export interface components {
             kind: "fields";
             /** Vector Operators */
             vector_operators?: string[];
+        };
+        /** Figures */
+        Figures: {
+            /** Drawdown */
+            drawdown: number;
+            /** Fitness */
+            fitness: number | null;
+            /** Margin */
+            margin: number;
+            /** Returns */
+            returns: number;
+            /** Sharpe */
+            sharpe: number | null;
+            /** Turnover */
+            turnover: number;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -4654,6 +4771,17 @@ export interface components {
             status: string | null;
             /** Swaps */
             swaps: components["schemas"]["SwapCount"][];
+        };
+        /** Pyramid */
+        Pyramid: {
+            /** Completes */
+            completes: boolean;
+            /** Multiplier */
+            multiplier: number | null;
+            /** Name */
+            name: string;
+            /** Submitted */
+            submitted: number;
         };
         /** PyramidCategory */
         PyramidCategory: {
@@ -7504,6 +7632,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Competitions"];
+                };
+            };
+        };
+    };
+    desk_api_desk_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Desk"];
+                };
+            };
+        };
+    };
+    check_candidates_api_desk_prod_correlation_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowStarted"];
                 };
             };
         };

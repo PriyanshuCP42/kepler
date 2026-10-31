@@ -1,0 +1,298 @@
+"""The Submission Desk: what each shortlisted Alpha would do to your pool if you submitted it.
+
+Every candidate is a Critic pass that leads its family: it passed BRAIN's checks, held up in
+the test years, covers its costs, and sits below 0.6 with your pool. The desk adds what
+decides whether to submit it:
+
+- **Combined performance, before and after**, worked out here from stored daily PnL as
+  BRAIN combines a pool: equal weight over the Alphas trading each day. Shown for your whole
+  pool and for the partition it would join (region, delay, Power Pool or Regular), the one
+  BRAIN's own before-and-after figure reproduces to the dollar.
+- **Production Correlation**, which only BRAIN can measure, against every user's Alphas. Read
+  from BRAIN's answers already kept; the desk can ask BRAIN for the missing ones.
+- **The pyramid it would count towards**, from the category of its first data field.
+
+Then a verdict: ready, check first, or blocked. Submitting stays a click on BRAIN.
+"""
+
+import asyncio
+from typing import Any, Literal
+
+from fastapi import APIRouter
+from sqlalchemy import select
+
+from ..brain.platform import (
+    POWER_POOL_CLASS,
+    PROD_CORRELATION_CEILING,
+    PYRAMID_MIN_ALPHAS,
+    SELF_CORRELATION_CEILING,
+)
+from ..db.models import CriticVerdict
+from ..labs.fastexpr import ParseError, data_fields, parse
+from ..schemas import Out
+from ..tools import portfolio, power_pool
+from ..vault.store import json_list
+from ..vault.yields import checks_of, is_submitted
+from .deps import State, refuse
+from .lab_tasks import AlphaIds, WorkflowStarted, check_prod_correlation, prod_correlations
+
+router = APIRouter(prefix="/api/desk", tags=["desk"])
+
+#: Candidates the desk weighs, best Critic score first.
+CANDIDATES = 40
+WHOLE = "all"
+
+Readiness = Literal["ready", "check", "hurts", "blocked"]
+
+
+class Figures(Out):
+    sharpe: float | None
+    fitness: float | None
+    returns: float
+    drawdown: float
+    turnover: float
+    margin: float
+
+
+class Effect(Out):
+    #: ``all`` or the partition, e.g. ``USA · D1 · Regular``.
+    scope: str
+    members: int
+    before: Figures | None
+    after: Figures | None
+
+
+class Pyramid(Out):
+    name: str
+    submitted: int
+    #: Submitting this one makes it :data:`PYRAMID_MIN_ALPHAS`.
+    completes: bool
+    multiplier: float | None
+
+
+class Candidate(Out):
+    alpha_id: str
+    region: str | None
+    delay: int | None
+    universe: str | None
+    expression: str | None
+    power_pool: bool
+    critic_score: float
+    sharpe: float | None
+    fitness: float | None
+    train_sharpe: float | None
+    test_sharpe: float | None
+    #: Highest with your submitted Alphas, from the Family Clerk.
+    pool_correlation: float | None
+    #: BRAIN's, against every user's Alphas; ``None`` until asked.
+    prod_correlation: float | None
+    effects: list[Effect]
+    pyramid: Pyramid | None
+    readiness: Readiness
+    reasons: list[str]
+
+
+class Desk(Out):
+    candidates: list[Candidate]
+    submitted: int
+    #: Candidates without stored daily PnL, so without an effect yet.
+    unmeasured: int
+    prod_ceiling: float
+    self_ceiling: float
+
+
+def partition_of(region: Any, delay: Any, power: bool) -> str:
+    return f"{region} · D{delay} · {'Power Pool' if power else 'Regular'}"
+
+
+def judge(
+    prod: float | None, pool: float | None, effects: list[Effect]
+) -> tuple[Readiness, list[str]]:
+    """Ready, check first, hurts the pool, or blocked, with why."""
+    if prod is not None and prod >= PROD_CORRELATION_CEILING:
+        return "blocked", [
+            f"Production Correlation {prod:.2f} is over BRAIN's {PROD_CORRELATION_CEILING}."
+        ]
+    if pool is not None and pool >= SELF_CORRELATION_CEILING:
+        return "blocked", [
+            f"Correlates {pool:.2f} with your pool; BRAIN's limit is {SELF_CORRELATION_CEILING}."
+        ]
+    reasons: list[str] = []
+    hurts = False
+    for effect in effects:
+        before, after = effect.before, effect.after
+        if before is None or after is None or before.sharpe is None or after.sharpe is None:
+            continue
+        change = after.sharpe - before.sharpe
+        where = "your pool" if effect.scope == WHOLE else effect.scope
+        reasons.append(f"Combined Sharpe of {where} {before.sharpe:.2f} → {after.sharpe:.2f}.")
+        hurts = hurts or change < 0
+    if hurts:
+        return "hurts", reasons
+    if prod is None:
+        return "check", ["Production Correlation not checked yet.", *reasons]
+    return "ready", [f"Production Correlation {prod:.2f}.", *reasons]
+
+
+def _figures(raw: dict[str, Any] | None) -> Figures | None:
+    return None if raw is None else Figures.model_validate(raw)
+
+
+def _first_category(expression: str | None, categories: dict[str, str]) -> str | None:
+    if not expression:
+        return None
+    try:
+        names = data_fields(parse(expression))
+    except ParseError:
+        return None
+    return next((categories[n] for n in names if n in categories), None)
+
+
+async def _pyramids(state: Any) -> tuple[dict[str, str], dict[tuple[str, int, str], Any]]:
+    """Field to category, and each pyramid's niche: submitted this quarter and multiplier."""
+    categories = {
+        str(r["field_id"]): str(r["c"]).lower()
+        for r in await state.catalog.query(
+            "SELECT field_id, any_value(category_id) AS c FROM data_field "
+            "WHERE category_id IS NOT NULL GROUP BY field_id"
+        )
+    }
+    # Signed out, the grid falls back to the vault; a failure leaves the pyramid blank.
+    try:
+        niches = {n.key: n for n in await state.strategist.niche_map()}
+    except Exception:  # noqa: BLE001
+        niches = {}
+    return categories, niches
+
+
+@router.get("")
+async def desk(state: State) -> Desk:
+    """The best unsubmitted Critic passes, one per family, with their effect on your pool."""
+    async with state.db.session() as session:
+        verdicts = (
+            await session.scalars(
+                select(CriticVerdict)
+                .where(
+                    CriticVerdict.verdict == "pass",
+                    CriticVerdict.family_id == CriticVerdict.alpha_id,
+                )
+                .order_by(CriticVerdict.score.desc())
+                .limit(CANDIDATES * 2)
+            )
+        ).all()
+    stored = await state.alphas.by_ids([v.alpha_id for v in verdicts])
+    chosen = [v for v in verdicts if v.alpha_id in stored and not is_submitted(stored[v.alpha_id])]
+    chosen = chosen[:CANDIDATES]
+
+    members = await state.alphas.submitted_members()
+    scopes: dict[str, list[str]] = {WHOLE: [str(m["alpha_id"]) for m in members]}
+    for m in members:
+        power = POWER_POOL_CLASS in json_list(m.get("classifications"))
+        name = partition_of(m["region"], m["delay"], power)
+        scopes.setdefault(name, []).append(str(m["alpha_id"]))
+
+    powered = {v.alpha_id: power_pool.is_power_pool(stored[v.alpha_id]) for v in chosen}
+    joins = {
+        v.alpha_id: [
+            WHOLE,
+            partition_of(
+                stored[v.alpha_id]["region"], stored[v.alpha_id]["delay"], powered[v.alpha_id]
+            ),
+        ]
+        for v in chosen
+    }
+    # A partition none of yours is in yet starts with this one alone.
+    for joined in joins.values():
+        scopes.setdefault(joined[1], [])
+    ids = [*scopes[WHOLE], *joins]
+    series = await state.alphas.series(ids)
+    meta = await state.alphas.by_ids(scopes[WHOLE]) | stored
+    effects = await asyncio.to_thread(portfolio.what_if, series, meta, scopes, joins)
+
+    checks = {v.alpha_id: checks_of(stored[v.alpha_id].get("checks")) for v in chosen}
+    prod = await prod_correlations(state, list(checks), checks)
+    categories, niches = await _pyramids(state)
+
+    out: list[Candidate] = []
+    for v in chosen:
+        row = stored[v.alpha_id]
+        found = [
+            Effect(
+                scope=scope,
+                members=e["members"],
+                before=_figures(e["before"]),
+                after=_figures(e["after"]),
+            )
+            for scope, e in effects.get(v.alpha_id, {}).items()
+        ]
+        pyramid = None
+        category = _first_category(row.get("expression"), categories)
+        if category is not None:
+            niche = niches.get((str(row["region"]), int(row["delay"] or 0), category))
+            submitted = niche.submitted if niche else 0
+            label = (niche.category_name if niche else category).upper()
+            pyramid = Pyramid(
+                name=f"{row['region']}/D{row['delay']}/{label}",
+                submitted=submitted,
+                completes=submitted + 1 == PYRAMID_MIN_ALPHAS,
+                multiplier=niche.multiplier if niche else None,
+            )
+        readiness, reasons = judge(prod.get(v.alpha_id), v.pool_correlation, found)
+        out.append(
+            Candidate(
+                alpha_id=v.alpha_id,
+                region=row.get("region"),
+                delay=row.get("delay"),
+                universe=row.get("universe"),
+                expression=row.get("expression"),
+                power_pool=powered[v.alpha_id],
+                critic_score=v.score,
+                sharpe=row.get("sharpe"),
+                fitness=row.get("fitness"),
+                train_sharpe=row.get("train_sharpe"),
+                test_sharpe=row.get("test_sharpe"),
+                pool_correlation=v.pool_correlation,
+                prod_correlation=prod.get(v.alpha_id),
+                effects=found,
+                pyramid=pyramid,
+                readiness=readiness,
+                reasons=reasons,
+            )
+        )
+    out.sort(key=_rank, reverse=True)
+    return Desk(
+        candidates=out,
+        submitted=len(scopes[WHOLE]),
+        unmeasured=sum(1 for c in out if not c.effects),
+        prod_ceiling=PROD_CORRELATION_CEILING,
+        self_ceiling=SELF_CORRELATION_CEILING,
+    )
+
+
+_ORDER: dict[Readiness, int] = {"ready": 3, "check": 2, "hurts": 1, "blocked": 0}
+
+
+def _rank(candidate: Candidate) -> tuple[int, float]:
+    """Ready first, then by how much it lifts your whole pool's combined Sharpe."""
+    return _ORDER[candidate.readiness], sharpe_change(candidate.effects, WHOLE) or 0.0
+
+
+def sharpe_change(effects: list[Effect], scope: str) -> float | None:
+    """How much joining moves this scope's combined Sharpe."""
+    for e in effects:
+        before = e.before.sharpe if e.before else None
+        after = e.after.sharpe if e.after else None
+        if e.scope == scope and before is not None and after is not None:
+            return after - before
+    return None
+
+
+@router.post("/prod-correlation", status_code=202)
+async def check_candidates(state: State) -> WorkflowStarted:
+    """Ask BRAIN for the Production Correlation of every candidate it has not given one for.
+    BRAIN limits these per hour; no simulation quota."""
+    found = await desk(state)
+    wanted = [c.alpha_id for c in found.candidates if c.prod_correlation is None]
+    if not wanted:
+        raise refuse(409, "nothing_to_check", "Every candidate has its Production Correlation.")
+    return await check_prod_correlation(AlphaIds.model_validate({"alphaIds": wanted}), state)

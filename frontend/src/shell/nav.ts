@@ -9,6 +9,7 @@ import {
   LayoutGridIcon,
   ListChecksIcon,
   RefreshCwIcon,
+  SendIcon,
   SparklesIcon,
   TriangleIcon,
   TrophyIcon,
@@ -63,6 +64,12 @@ export const NAV = [
     group: '',
     label: 'Autopilot',
     icon: GaugeIcon,
+  },
+  {
+    to: '/desk',
+    group: '',
+    label: 'Submission Desk',
+    icon: SendIcon,
   },
   {
     to: '/dashboard',

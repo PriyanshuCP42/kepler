@@ -102,6 +102,58 @@ def compute(
     }
 
 
+def what_if(
+    series: dict[str, dict[date, tuple[float, float]]],
+    meta: dict[str, dict[str, Any]],
+    scopes: dict[str, list[str]],
+    candidates: dict[str, list[str]],
+) -> dict[str, dict[str, dict[str, Any]]]:
+    """Each candidate's effect on the pools it would join, before it is submitted.
+
+    ``scopes`` names pools of submitted Alphas (all of them, one partition); ``candidates``
+    maps each candidate to the scopes it would join. Returns, by candidate and scope, the
+    pool's in-sample figures ``before`` and ``after`` it joins, combined as :func:`compute`
+    combines them: equal weight over the Alphas already trading each day. Laid out once for
+    every pool and candidate together, so a page of candidates costs one frame.
+    """
+    pooled = {a for ids in scopes.values() for a in ids}
+    ids = [a for a in dict.fromkeys([*pooled, *candidates]) if series.get(a)]
+    if not ids:
+        return {}
+    column = {a: i for i, a in enumerate(ids)}
+    _, pnl, turnover = exported(*frame(series, meta, ids))
+    filled = np.nan_to_num(pnl)
+    started = np.maximum.accumulate((filled != 0) | (turnover != 0), axis=0)
+
+    def figures(cols: list[int]) -> dict[str, Any] | None:
+        if not cols:
+            return None
+        live = np.maximum(started[:, cols].sum(axis=1), 1)
+        book = filled[:, cols].sum(axis=1) / live
+        traded = turnover[:, cols].sum(axis=1) / live
+        found = metrics.stats(book, traded)
+        return None if found is None else asdict(found)
+
+    columns = {
+        name: [column[a] for a in members if a in column] for name, members in scopes.items()
+    }
+    before = {name: figures(cols) for name, cols in columns.items()}
+    out: dict[str, dict[str, dict[str, Any]]] = {}
+    for candidate, joins in candidates.items():
+        if candidate not in column:
+            continue
+        out[candidate] = {
+            name: {
+                "members": len(columns[name]),
+                "before": before[name],
+                "after": figures([*columns[name], column[candidate]]),
+            }
+            for name in joins
+            if name in columns
+        }
+    return out
+
+
 def highest_correlations(ids: list[str], framed: Framed) -> dict[str, float | None]:
     """Each Alpha's highest correlation with any other of ``ids``, measured as the grid below
     measures it. ``framed`` is their :func:`frame`."""

@@ -36,6 +36,12 @@ const autopilot = createRoute({
   component: lazyRouteComponent(() => import('@/screens/autopilot'), 'AutopilotScreen'),
 })
 
+const desk = createRoute({
+  getParentRoute: () => root,
+  path: '/desk',
+  component: lazyRouteComponent(() => import('@/screens/desk'), 'DeskScreen'),
+})
+
 const dashboard = createRoute({
   getParentRoute: () => root,
   path: '/dashboard',
@@ -225,6 +231,7 @@ const routeTree = root.addChildren([
   index,
   hq,
   autopilot,
+  desk,
   dashboard,
   matrix,
   data,
