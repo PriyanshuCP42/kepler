@@ -980,6 +980,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/desk/describe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write Descriptions
+         * @description Write and save a Power Pool description for every Power Pool candidate BRAIN has not
+         *     passed, then run its submission check again. In the background. Uses the description
+         *     model chosen in Settings; no simulation quota. An existing description of 100 characters
+         *     or more is kept, and so are the alpha's name, category, colour and tags.
+         */
+        post: operations["write_descriptions_api_desk_describe_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/desk/guard": {
         parameters: {
             query?: never;
@@ -8347,6 +8370,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Desk"];
+                };
+            };
+        };
+    };
+    write_descriptions_api_desk_describe_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowStarted"];
                 };
             };
         };

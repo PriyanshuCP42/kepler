@@ -10,6 +10,7 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   MicroscopeIcon,
+  PenLineIcon,
   RefreshCwIcon,
   ShieldCheckIcon,
   WrenchIcon,
@@ -125,6 +126,15 @@ export function DeskScreen() {
       }),
     onError: (error) => toast.error(errorMessage(error)),
   })
+  const describe = useMutation({
+    mutationFn: desk.describe,
+    onSuccess: () =>
+      toast.success('Writing Power Pool descriptions', {
+        description:
+          'Each is written by your description model, saved on BRAIN, then checked again. Name, category, colour and tags stay as they are.',
+      }),
+    onError: (error) => toast.error(errorMessage(error)),
+  })
   const repairFailing = useMutation({
     mutationFn: () => desk.repairFailing(),
     onSuccess: (task) => {
@@ -142,6 +152,13 @@ export function DeskScreen() {
         c.submission?.status === 'not_run' && (c.readiness === 'ready' || c.readiness === 'check'),
     ).length ?? 0
   const refused = data?.candidates.filter((c) => c.readiness === 'fails_check').length ?? 0
+  const undescribed =
+    data?.candidates.filter(
+      (c) =>
+        c.powerPool &&
+        ['ready', 'check', 'fails_check'].includes(c.readiness) &&
+        c.submission?.status !== 'passes',
+    ).length ?? 0
   const unguarded =
     data?.candidates.filter(
       (c) => c.guard.status === 'untested' && (c.readiness === 'ready' || c.readiness === 'check'),
@@ -164,6 +181,15 @@ export function DeskScreen() {
             >
               <ShieldCheckIcon />
               Run Submission Check{unchecked ? ` (${unchecked})` : ''}
+            </Button>
+            <Button
+              loading={describe.isPending}
+              disabled={!undescribed}
+              onClick={() => describe.mutate()}
+              title="An alpha that misses a threshold is accepted only as a Power Pool alpha, which needs a description of 100 characters or more"
+            >
+              <PenLineIcon />
+              Write Descriptions{undescribed ? ` (${undescribed})` : ''}
             </Button>
             <Button
               loading={repairFailing.isPending}
@@ -659,11 +685,12 @@ function SubmissionDetails({
       {submission.needsDescription && (
         <span className="text-ink-muted">
           BRAIN asks for a Power Pool description it does not have (100 characters or more). An
-          alpha that misses a threshold is accepted only through the Power Pool route:{' '}
+          alpha that misses a threshold is accepted only through the Power Pool route: Write
+          Descriptions writes, saves and checks them all, or{' '}
           <Link to="/alpha/$alphaId" params={{ alphaId }} className={LINK}>
-            write its description on its Alpha page
+            write this one on its Alpha page
           </Link>
-          , save, then check it again.
+          .
         </span>
       )}
     </div>

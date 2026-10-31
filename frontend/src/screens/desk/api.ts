@@ -149,6 +149,9 @@ export const desk = {
   checkProd: () => http.post<{ taskId: string }>('/api/desk/prod-correlation'),
   /** Runs BRAIN's submission check on every Ready or Check First candidate not checked yet. */
   submissionCheck: () => http.post<{ taskId: string }>('/api/desk/submission-check'),
+  /** Writes and saves a Power Pool description for each Power Pool candidate BRAIN has not
+   *  passed, then checks it again. In the background. */
+  describe: () => http.post<{ taskId: string }>('/api/desk/describe'),
   /** Writes repairs for the candidates BRAIN's submission check refused. */
   repairFailing: (cores = 4) =>
     http.post<{ id: number; name: string; alphas: number }>('/api/desk/repair', { cores }),
