@@ -69,6 +69,11 @@ POSITIONAL_NOTE = "Matched to this request by submission order."
 #: hiccup: the same expressions simulate alone. Its simulations are queued again this often.
 BLANK_BATCH_RETRIES = 1
 
+#: BRAIN has answered "daily limit reached" with thousands of simulations left and taken the
+#: next one minutes later, so sending is tried again after this long rather than only at the
+#: reset. A limit that is real refuses that one send again and costs nothing.
+DAILY_LIMIT_RECHECK_SECONDS = 1800.0
+
 #: How often the engine looks for work.
 TICK_SECONDS = 2.0
 
@@ -520,7 +525,7 @@ class BatchEngine:
     async def _fill_slots(self) -> int:
         reset = self._limit_resets_at
         if self._daily_limit_hit and reset is not None and time.time() >= reset:
-            # BRAIN's day has turned: the quota is back.
+            # BRAIN's day has turned, or the recheck is due: try sending again.
             self._daily_limit_hit = False
             self._limit_resets_at = None
         if self._daily_limit_hit:
@@ -899,7 +904,8 @@ class BatchEngine:
 
     async def _on_daily_limit(self) -> None:
         self._daily_limit_hit = True
-        self._limit_resets_at = time.time() + await self._seconds_to_reset()
+        wait = min(await self._seconds_to_reset(), DAILY_LIMIT_RECHECK_SECONDS)
+        self._limit_resets_at = time.time() + wait
         log.warning("engine.daily_limit_reached")
         await self.tracker.notify()
 

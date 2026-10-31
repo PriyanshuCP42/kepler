@@ -280,7 +280,7 @@ function Clocks() {
         label={limitHit ? 'Simulations Today' : 'Simulations Left Today'}
         hint={
           limitHit
-            ? 'BRAIN refused more simulations today; sending resumes at the quota reset'
+            ? 'BRAIN refused more simulations; Kepler tries again within 30 minutes'
             : "Simulations Left in Today's Quota"
         }
         valueFirst
