@@ -46,7 +46,7 @@ router = APIRouter(prefix="/api/desk", tags=["desk"])
 CANDIDATES = 40
 WHOLE = "all"
 
-Readiness = Literal["ready", "check", "hurts", "overfit", "blocked"]
+Readiness = Literal["ready", "check", "hurts", "fading", "overfit", "blocked"]
 
 
 class Figures(Out):
@@ -64,6 +64,15 @@ class Effect(Out):
     members: int
     before: Figures | None
     after: Figures | None
+    #: The same over :data:`..agents.guard.RECENT_YEARS`, the nearest days to those BRAIN's
+    #: Combined Alpha Performance is measured on.
+    recent_before: Figures | None = None
+    recent_after: Figures | None = None
+
+
+class YearSharpe(Out):
+    year: int
+    sharpe: float | None
 
 
 class Pyramid(Out):
@@ -98,6 +107,10 @@ class GuardView(Out):
     positive_years: int
     test_days: int | None
     test_without_spike: float | None
+    #: Its Sharpe in each recent year, over them together, and over its whole history.
+    recent_years: list[YearSharpe] = Field(default_factory=list)
+    recent_sharpe: float | None = None
+    full_sharpe: float | None = None
 
 
 class Candidate(Out):
@@ -130,6 +143,10 @@ class Desk(Out):
     unmeasured: int
     prod_ceiling: float
     self_ceiling: float
+    #: Your whole pool's combined Sharpe in each backtest year.
+    pool_years: list[YearSharpe]
+    recent_from: int
+    recent_to: int
 
 
 def partition_of(region: Any, delay: Any, power: bool) -> str:
@@ -162,6 +179,27 @@ def overfitting(view: GuardView, test_sharpe: float | None) -> list[str]:
     return doubts
 
 
+def fading(view: GuardView) -> list[str]:
+    """Why it looks to be dying out in the last backtest years; empty when it does not."""
+    span = guard.RECENT_SPAN
+    found: list[str] = []
+    weak = [
+        y for y in view.recent_years if y.sharpe is not None and y.sharpe < guard.MIN_YEAR_SHARPE
+    ]
+    if weak:
+        years = ", ".join(f"{y.year} ({y.sharpe:.2f})" for y in weak)
+        found.append(
+            f"Weak in {years}: every year of {span} needs a Sharpe of {guard.MIN_YEAR_SHARPE}."
+        )
+    recent, full = view.recent_sharpe, view.full_sharpe
+    if recent is not None and full is not None and full > 0 and recent < guard.KEEP_RECENT * full:
+        found.append(
+            f"Fading: {span} Sharpe {recent:.2f} keeps only {recent / full:.0%} of its "
+            f"whole-history {full:.2f}."
+        )
+    return found
+
+
 _GUARD_PENDING = {
     "untested": "Neighbour check not run yet.",
     "running": "Neighbour check still running.",
@@ -187,17 +225,28 @@ def judge(
         ]
     reasons: list[str] = []
     hurts = False
+    span = guard.RECENT_SPAN
     for effect in effects:
-        before, after = effect.before, effect.after
+        # Judged on the recent years where they are known: the nearest to what BRAIN scores.
+        recent = effect.recent_before is not None and effect.recent_after is not None
+        before, after = (
+            (effect.recent_before, effect.recent_after) if recent else (effect.before, effect.after)
+        )
         if before is None or after is None or before.sharpe is None or after.sharpe is None:
             continue
         change = after.sharpe - before.sharpe
         where = "your pool" if effect.scope == WHOLE else effect.scope
-        reasons.append(f"Combined Sharpe of {where} {before.sharpe:.2f} → {after.sharpe:.2f}.")
+        when = f" in {span}" if recent else ""
+        reasons.append(
+            f"Combined Sharpe of {where}{when} {before.sharpe:.2f} → {after.sharpe:.2f}."
+        )
         hurts = hurts or change < 0
     doubts = overfitting(view, test_sharpe) if view is not None else []
     if doubts:
         return "overfit", [*doubts, *reasons]
+    dying = fading(view) if view is not None else []
+    if dying:
+        return "fading", [*dying, *reasons]
     if hurts:
         return "hurts", reasons
     pending = [] if prod is not None else ["Production Correlation not checked yet."]
@@ -282,7 +331,10 @@ async def desk(state: State) -> Desk:
     ids = [*scopes[WHOLE], *joins]
     series = await state.alphas.series(ids)
     meta = await state.alphas.by_ids(scopes[WHOLE]) | stored
-    effects = await asyncio.to_thread(portfolio.what_if, series, meta, scopes, joins)
+    effects = await asyncio.to_thread(
+        portfolio.what_if, series, meta, scopes, joins, guard.RECENT_START
+    )
+    pool = await asyncio.to_thread(portfolio.compute, series, meta, scopes[WHOLE], 0.0)
 
     rows = {v.alpha_id: stored[v.alpha_id] for v in chosen}
     verdicts_of = await state.guard.verdicts(rows)
@@ -301,6 +353,8 @@ async def desk(state: State) -> Desk:
                 members=e["members"],
                 before=_figures(e["before"]),
                 after=_figures(e["after"]),
+                recent_before=_figures(e["recent_before"]),
+                recent_after=_figures(e["recent_after"]),
             )
             for scope, e in effects.get(v.alpha_id, {}).items()
         ]
@@ -351,6 +405,11 @@ async def desk(state: State) -> Desk:
         unmeasured=sum(1 for c in out if not c.effects),
         prod_ceiling=PROD_CORRELATION_CEILING,
         self_ceiling=SELF_CORRELATION_CEILING,
+        pool_years=[
+            YearSharpe(year=int(y["year"]), sharpe=y.get("sharpe")) for y in pool["yearly"]
+        ],
+        recent_from=guard.RECENT_YEARS[0],
+        recent_to=guard.RECENT_YEARS[-1],
     )
 
 
@@ -365,6 +424,7 @@ def _guard_view(
         {d: p for d, (p, _) in (days or {}).items()},
         test_start if isinstance(test_start, date) else None,
     )
+    form = guard.recent_form(days or {})
     return GuardView(
         status=found.status,
         held=found.held,
@@ -376,22 +436,37 @@ def _guard_view(
         positive_years=steady.positive_years,
         test_days=steady.test_days,
         test_without_spike=steady.test_without_spike,
+        recent_years=[YearSharpe(year=y, sharpe=v) for y, v in form.years.items()],
+        recent_sharpe=form.recent,
+        full_sharpe=form.full,
     )
 
 
-_ORDER: dict[Readiness, int] = {"ready": 4, "check": 3, "hurts": 2, "overfit": 1, "blocked": 0}
+_ORDER: dict[Readiness, int] = {
+    "ready": 5,
+    "check": 4,
+    "hurts": 3,
+    "fading": 2,
+    "overfit": 1,
+    "blocked": 0,
+}
 
 
 def _rank(candidate: Candidate) -> tuple[int, float]:
-    """Ready first, then by how much it lifts your whole pool's combined Sharpe."""
-    return _ORDER[candidate.readiness], sharpe_change(candidate.effects, WHOLE) or 0.0
+    """Ready first, then by how much it lifts your whole pool's combined Sharpe in the recent
+    years, the nearest to what BRAIN scores."""
+    change = sharpe_change(candidate.effects, WHOLE, recent=True)
+    if change is None:
+        change = sharpe_change(candidate.effects, WHOLE)
+    return _ORDER[candidate.readiness], change or 0.0
 
 
-def sharpe_change(effects: list[Effect], scope: str) -> float | None:
-    """How much joining moves this scope's combined Sharpe."""
+def sharpe_change(effects: list[Effect], scope: str, *, recent: bool = False) -> float | None:
+    """How much joining moves this scope's combined Sharpe, over every year or the recent ones."""
     for e in effects:
-        before = e.before.sharpe if e.before else None
-        after = e.after.sharpe if e.after else None
+        old, new = (e.recent_before, e.recent_after) if recent else (e.before, e.after)
+        before = old.sharpe if old else None
+        after = new.sharpe if new else None
         if e.scope == scope and before is not None and after is not None:
             return after - before
     return None

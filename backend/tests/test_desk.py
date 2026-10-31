@@ -67,3 +67,11 @@ class TestVerdict:
     def test_sharpe_change(self):
         assert sharpe_change(self._lifts(1.0, 1.25), WHOLE) == pytest.approx(0.25)
         assert sharpe_change(self._lifts(), "USA · D1 · Regular") is None
+
+
+def test_what_if_reports_the_recent_years_too():
+    series = {"a": _series(1, days=900), "c": _series(3, days=900, drift=3.0)}
+    found = portfolio.what_if(series, {}, {WHOLE: ["a"]}, {"c": [WHOLE]}, date(2023, 1, 1))
+    effect = found["c"][WHOLE]
+    assert effect["recent_before"] is not None
+    assert effect["recent_after"]["days"] < effect["after"]["days"]

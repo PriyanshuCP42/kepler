@@ -26,6 +26,7 @@ import {
   type Figures,
   type GuardView,
   type Readiness,
+  type YearSharpe,
 } from '@/screens/desk/api'
 import {
   Badge,
@@ -60,6 +61,11 @@ const READINESS: Record<Readiness, { label: string; tone: Tone; note: string }> 
     label: 'Lowers Pool',
     tone: 'muted',
     note: 'Would lower the combined Sharpe of your pool or its partition.',
+  },
+  fading: {
+    label: 'Fading',
+    tone: 'loss',
+    note: 'Weak in a recent year, or its recent years keep too little of its Sharpe.',
   },
   overfit: {
     label: 'Overfit',
@@ -145,8 +151,12 @@ export function DeskScreen() {
         <Skeleton className="h-96" label="Weighing candidates" />
       ) : (
         <>
+          <PoolYears years={data.poolYears} from={data.recentFrom} to={data.recentTo} />
           <Summary candidates={data.candidates} submitted={data.submitted} />
-          <CandidatesPanel candidates={data.candidates} />
+          <CandidatesPanel
+            candidates={data.candidates}
+            span={`${data.recentFrom ?? 2021}–${data.recentTo ?? 2023}`}
+          />
           <p className="text-body-compact text-pretty text-ink-subtle">
             Combined figures are worked out here from stored daily PnL, at equal weight over the
             alphas trading each day, as BRAIN combines a pool; per partition this matches BRAIN's
@@ -163,7 +173,7 @@ export function DeskScreen() {
 function Summary({ candidates, submitted }: { candidates: Candidate[]; submitted: number }) {
   const count = (r: Readiness) => candidates.filter((c) => c.readiness === r).length
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-7">
       {(Object.keys(READINESS) as Readiness[]).map((r) => (
         <Metric
           key={r}
@@ -190,10 +200,58 @@ function effectOf(c: Candidate, whole: boolean): Effect | undefined {
   return c.effects.find((e) => (e.scope === WHOLE) === whole)
 }
 
-function Change({ effect }: { effect: Effect | undefined }) {
-  const after = effect?.after?.sharpe
+function PoolYears({
+  years,
+  from,
+  to,
+}: {
+  years: YearSharpe[] | undefined
+  from: number
+  to: number
+}) {
+  // Absent from a backend older than this screen, until it is restarted.
+  if (!years?.length) return null
+  const first = years[0]
+  const last = years[years.length - 1]
+  return (
+    <Panel
+      title="Your Pool, Year by Year"
+      description={`Combined Sharpe of your submitted alphas in each backtest year. BRAIN's Combined Alpha Performance is measured on the days after the backtest (from 2024), which BRAIN keeps hidden, so ${from}–${to} is the nearest Kepler can see: candidates are judged and ranked on it.`}
+    >
+      <div className="flex flex-wrap gap-2">
+        {years.map((y) => {
+          const recent = y.year >= from && y.year <= to
+          return (
+            <div
+              key={y.year}
+              className={cn(
+                'flex min-w-16 flex-col items-center rounded border px-2 py-1',
+                recent ? 'border-hairline-strong bg-surface-2' : 'border-hairline',
+              )}
+            >
+              <span className="num text-caption text-ink-subtle">{y.year}</span>
+              <span className="num text-body text-ink">{fmt.ratio(y.sharpe, 1)}</span>
+            </div>
+          )
+        })}
+      </div>
+      {isNum(first?.sharpe) && isNum(last?.sharpe) && last.sharpe < first.sharpe && (
+        <p className="mt-3 text-body-compact text-pretty text-ink-muted">
+          Falling from {fmt.ratio(first.sharpe, 1)} in {first.year} to {fmt.ratio(last.sharpe, 1)}{' '}
+          in {last.year}: your alphas lose edge with time, which is how the combined figure turns
+          negative after submission. Only alphas still strong in every year of {from}–{to} reach
+          Ready.
+        </p>
+      )}
+    </Panel>
+  )
+}
+
+function Change({ effect, recent = false }: { effect: Effect | undefined; recent?: boolean }) {
+  const shown = recent ? effect?.recentAfter : effect?.after
+  const after = shown?.sharpe
   if (!effect || !isNum(after)) return <span className="text-ink-subtle">{DASH}</span>
-  const before = effect.before?.sharpe
+  const before = (recent ? effect.recentBefore : effect.before)?.sharpe
   if (!isNum(before)) {
     return (
       <span className="num text-ink" title="None of your alphas is in this partition yet">
@@ -215,7 +273,7 @@ function Change({ effect }: { effect: Effect | undefined }) {
   )
 }
 
-function CandidatesPanel({ candidates }: { candidates: Candidate[] }) {
+function CandidatesPanel({ candidates, span }: { candidates: Candidate[]; span: string }) {
   const [open, setOpen] = useState<string | null>(null)
   return (
     <Panel
@@ -240,8 +298,8 @@ function CandidatesPanel({ candidates }: { candidates: Candidate[] }) {
                 <th className="px-4 py-2 text-right font-medium">Pool Corr</th>
                 <th className="px-4 py-2 text-right font-medium">Prod Corr</th>
                 <th className="px-4 py-2 font-medium">Neighbours</th>
-                <th className="px-4 py-2 font-medium">Your Pool Sharpe</th>
-                <th className="px-4 py-2 font-medium">Partition Sharpe</th>
+                <th className="px-4 py-2 font-medium">Your Pool Sharpe {span}</th>
+                <th className="px-4 py-2 font-medium">Partition Sharpe {span}</th>
                 <th className="px-4 py-2 font-medium">Pyramid</th>
               </tr>
             </thead>
@@ -306,10 +364,13 @@ function CandidatesPanel({ candidates }: { candidates: Candidate[] }) {
                         <GuardBadge guard={c.guard} />
                       </td>
                       <td className="px-4 py-2">
-                        <Change effect={effectOf(c, true)} />
+                        <Change effect={effectOf(c, true)} recent />
+                        <div className="text-caption text-ink-subtle">
+                          all years: <Change effect={effectOf(c, true)} />
+                        </div>
                       </td>
                       <td className="px-4 py-2">
-                        <Change effect={partition} />
+                        <Change effect={partition} recent />
                         {partition && (
                           <div className="text-caption text-ink-subtle">
                             {partition.scope} · {fmt.int(partition.members)} alphas
@@ -378,6 +439,27 @@ function GuardDetails({ guard, testSharpe }: { guard: GuardView; testSharpe: num
   return (
     <div className="flex flex-col gap-2">
       <ul className="flex flex-col gap-0.5 text-body-compact text-ink-muted">
+        {(guard.recentYears?.length ?? 0) > 0 && (
+          <li>
+            Sharpe by recent year:{' '}
+            {(guard.recentYears ?? []).map((y, i) => (
+              <span key={y.year}>
+                {i > 0 && ' · '}
+                {y.year}{' '}
+                <span
+                  className={cn(
+                    'num',
+                    isNum(y.sharpe) && y.sharpe < 0.5 ? TEXT_TONE.loss : 'text-ink',
+                  )}
+                >
+                  {fmt.ratio(y.sharpe)}
+                </span>
+              </span>
+            ))}
+            ; together {fmt.ratio(guard.recentSharpe)} against {fmt.ratio(guard.fullSharpe)} over
+            its whole history.
+          </li>
+        )}
         <li className={luck ? TEXT_TONE.loss : undefined}>
           {fmt.int(guard.siblings)} simulations of this idea in its region: chance alone takes the
           best of them to a test Sharpe of {fmt.ratio(guard.luckBar)}; this one has{' '}
@@ -478,6 +560,15 @@ function Details({ candidate }: { candidate: Candidate }) {
               </tr>
             </thead>
             <tbody>
+              <tr className="border-t border-hairline">
+                <td className="py-1 pr-3 text-ink-muted">Sharpe, recent years</td>
+                <td className="num py-1 pr-3 text-right text-ink-muted">
+                  {fmt.ratio(effect.recentBefore?.sharpe)}
+                </td>
+                <td className="num py-1 text-right text-ink">
+                  {fmt.ratio(effect.recentAfter?.sharpe)}
+                </td>
+              </tr>
               {ROWS.map((row) => (
                 <tr key={row.key} className="border-t border-hairline">
                   <td className="py-1 pr-3 text-ink-muted">{row.label}</td>

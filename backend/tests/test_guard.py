@@ -151,3 +151,70 @@ class TestDeskVerdict:
 
     def test_blocked_beats_everything(self):
         assert judge(0.9, 0.2, _lifts(), _view(status="fragile"), 1.5)[0] == "blocked"
+
+
+def _year_series(sharpe_by_year: dict[int, float]) -> dict[date, tuple[float, float]]:
+    """Daily PnL whose yearly Sharpe follows ``sharpe_by_year``, roughly: mean over noise."""
+    import numpy as np
+
+    rng = np.random.default_rng(0)
+    out: dict[date, tuple[float, float]] = {}
+    for year, target in sharpe_by_year.items():
+        day = date(year, 1, 1)
+        while day.year == year:
+            if day.weekday() < 5:
+                out[day] = (float(target / 16 + rng.normal(0, 1)), 0.1)
+            day += timedelta(days=1)
+    return out
+
+
+class TestRecentForm:
+    def test_steady_alpha_is_neither_weak_nor_fading(self):
+        form = guard.recent_form(_year_series(dict.fromkeys(range(2016, 2024), 3.0)))
+        assert set(form.years) == {2021, 2022, 2023}
+        assert form.weak_years == []
+        assert not form.fading
+
+    def test_dying_alpha_fades(self):
+        early = dict.fromkeys(range(2016, 2021), 6.0)
+        late = {2021: 1.0, 2022: 0.8, 2023: 0.6}
+        form = guard.recent_form(_year_series(early | late))
+        assert form.fading
+        assert form.recent is not None
+        assert form.full is not None
+        assert form.recent < form.full
+
+
+class TestFadingVerdict:
+    def test_a_weak_recent_year_is_fading(self):
+        years = [
+            {"year": 2021, "sharpe": 2.0},
+            {"year": 2022, "sharpe": 0.2},
+            {"year": 2023, "sharpe": 2.0},
+        ]
+        view = _view(recent_years=years, recent_sharpe=1.5, full_sharpe=1.6)
+        readiness, reasons = judge(0.3, 0.2, _lifts(), view, 1.5)
+        assert readiness == "fading"
+        assert "2022" in reasons[0]
+
+    def test_fading_into_the_recent_years(self):
+        view = _view(recent_sharpe=1.0, full_sharpe=2.0)
+        assert judge(0.3, 0.2, _lifts(), view, 1.5)[0] == "fading"
+
+    def test_holding_up_is_ready(self):
+        view = _view(recent_sharpe=1.9, full_sharpe=2.0)
+        assert judge(0.3, 0.2, _lifts(), view, 1.5)[0] == "ready"
+
+    def test_lowering_the_pool_in_the_recent_years_hurts(self):
+        fig = {"fitness": 1.0, "returns": 0.1, "drawdown": 0.05, "turnover": 0.2, "margin": 1e-3}
+        effect = Effect(
+            scope=WHOLE,
+            members=5,
+            before=Figures(sharpe=1.0, **fig),
+            after=Figures(sharpe=1.2, **fig),
+            recent_before=Figures(sharpe=1.0, **fig),
+            recent_after=Figures(sharpe=0.9, **fig),
+        )
+        readiness, reasons = judge(0.3, 0.2, [effect], _view(), 1.5)
+        assert readiness == "hurts"
+        assert "2021-2023" in reasons[0]

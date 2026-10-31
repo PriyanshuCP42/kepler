@@ -14,6 +14,12 @@ So before a finalist is called ready, three checks:
   years has a standard error of about ``1 / sqrt(T)``. Variants of one idea move together, so
   half of that is charged. ``n`` counts every simulation in the vault of the same expression
   with its numbers blanked out, in the same region.
+- **Recent form.** BRAIN measures what counts, Combined Alpha Performance, on the days after
+  the backtest ends (from 2024), and keeps those days hidden. The nearest days anyone can see
+  are the last backtest years, so an Alpha must still be strong there: every one of
+  :data:`RECENT_YEARS` at a Sharpe of :data:`MIN_YEAR_SHARPE` or more, and those years together
+  keeping :data:`KEEP_RECENT` of its whole-history Sharpe. One that is fading into them is
+  likely still fading after them.
 - **Consistency.** It traded on enough days of the test years for its Sharpe to mean
   something, most years it traded in made money, and the test years still made money without
   their best days, so one lucky stretch is not carrying it.
@@ -27,8 +33,10 @@ import math
 import re
 from collections import Counter
 from dataclasses import dataclass, field
+from datetime import date
 from typing import TYPE_CHECKING, Any, Literal
 
+import numpy as np
 import structlog
 from sqlalchemy import select
 
@@ -37,6 +45,7 @@ from ..db.models import GuardCheck, Trial, TrialState, utcnow
 from ..labs.launch import AddedTask, add_study
 from ..labs.params import GUARD_SAMPLER, GuardParams
 from ..tools import settings_sampler
+from ..vault import metrics
 from .repair import (
     Options,
     Settings,
@@ -50,8 +59,6 @@ from .repair import (
 )
 
 if TYPE_CHECKING:
-    from datetime import date
-
     from ..brain.schemas import SimulationRequest
     from .bus import AgentBus
 
@@ -74,6 +81,16 @@ SPIKE_DAYS = 10
 #: Days of the test years the Alpha must trade on, about one in five: a Sharpe from a
 #: handful of trades is luck, however high.
 MIN_TEST_DAYS = 100
+
+#: The last backtest years, the nearest to the hidden days Combined Alpha Performance is
+#: measured on.
+RECENT_YEARS = (2021, 2022, 2023)
+RECENT_START = date(RECENT_YEARS[0], 1, 1)
+RECENT_SPAN = f"{RECENT_YEARS[0]}-{RECENT_YEARS[-1]}"
+#: Each recent year must reach this Sharpe.
+MIN_YEAR_SHARPE = 0.5
+#: The recent years together must keep this share of the whole-history Sharpe.
+KEEP_RECENT = 0.75
 
 Status = Literal["untested", "running", "robust", "fragile", "inconclusive"]
 
@@ -218,6 +235,46 @@ def consistency(days: dict[date, float], test_start: date | None) -> Consistency
         if len(test) >= SPIKE_DAYS * 4:
             found.test_without_spike = sum(test[SPIKE_DAYS:])
     return found
+
+
+@dataclass(slots=True)
+class RecentForm:
+    #: Sharpe in each of :data:`RECENT_YEARS`; ``None`` for a year it has no days in.
+    years: dict[int, float | None] = field(default_factory=dict)
+    #: Sharpe over :data:`RECENT_YEARS` together, and over its whole history.
+    recent: float | None = None
+    full: float | None = None
+
+    @property
+    def weak_years(self) -> list[int]:
+        return [y for y, s in self.years.items() if s is not None and s < MIN_YEAR_SHARPE]
+
+    @property
+    def fading(self) -> bool:
+        return (
+            self.recent is not None
+            and self.full is not None
+            and self.full > 0
+            and self.recent < KEEP_RECENT * self.full
+        )
+
+
+def recent_form(series: dict[date, tuple[float, float]]) -> RecentForm:
+    """Its Sharpe in each recent year and over them together, against its whole history."""
+    if not series:
+        return RecentForm()
+    days = sorted(series)
+    pnl = np.array([series[d][0] for d in days])
+    traded = np.array([series[d][1] for d in days])
+    by_year = {y: s.sharpe for y, _, s in metrics.yearly(days, pnl, traded, None)}
+    late = np.array(days, dtype="datetime64[D]") >= np.datetime64(RECENT_START, "D")
+    recent = metrics.stats(pnl[late], traded[late], trim=False) if late.any() else None
+    full = metrics.stats(pnl, traded)
+    return RecentForm(
+        years={y: by_year.get(y) for y in RECENT_YEARS},
+        recent=recent.sharpe if recent else None,
+        full=full.sharpe if full else None,
+    )
 
 
 # -- verdicts ------------------------------------------------------------------

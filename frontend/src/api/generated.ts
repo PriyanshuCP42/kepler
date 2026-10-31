@@ -3140,7 +3140,7 @@ export interface components {
              * Readiness
              * @enum {string}
              */
-            readiness: "ready" | "check" | "hurts" | "overfit" | "blocked";
+            readiness: "ready" | "check" | "hurts" | "fading" | "overfit" | "blocked";
             /** Reasons */
             reasons: string[];
             /** Region */
@@ -3514,8 +3514,14 @@ export interface components {
         Desk: {
             /** Candidates */
             candidates: components["schemas"]["Candidate"][];
+            /** Poolyears */
+            poolYears: components["schemas"]["YearSharpe"][];
             /** Prodceiling */
             prodCeiling: number;
+            /** Recentfrom */
+            recentFrom: number;
+            /** Recentto */
+            recentTo: number;
             /** Selfceiling */
             selfCeiling: number;
             /** Submitted */
@@ -3534,6 +3540,8 @@ export interface components {
             before: components["schemas"]["Figures"] | null;
             /** Members */
             members: number;
+            recentAfter?: components["schemas"]["Figures"] | null;
+            recentBefore?: components["schemas"]["Figures"] | null;
             /** Scope */
             scope: string;
         };
@@ -3898,6 +3906,8 @@ export interface components {
          * @description The Overfitting Guard on one candidate: see :mod:`..agents.guard`.
          */
         GuardView: {
+            /** Fullsharpe */
+            fullSharpe?: number | null;
             /** Held */
             held: number;
             /** Luckbar */
@@ -3908,6 +3918,10 @@ export interface components {
             neighbours: components["schemas"]["NeighbourOut"][];
             /** Positiveyears */
             positiveYears: number;
+            /** Recentsharpe */
+            recentSharpe?: number | null;
+            /** Recentyears */
+            recentYears?: components["schemas"]["YearSharpe"][];
             /** Siblings */
             siblings: number;
             /**
@@ -6565,6 +6579,13 @@ export interface components {
             sharpe: number | null;
             /** Turnover */
             turnover: number;
+            /** Year */
+            year: number;
+        };
+        /** YearSharpe */
+        YearSharpe: {
+            /** Sharpe */
+            sharpe: number | null;
             /** Year */
             year: number;
         };

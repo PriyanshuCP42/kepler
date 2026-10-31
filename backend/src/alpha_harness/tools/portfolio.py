@@ -107,32 +107,43 @@ def what_if(
     meta: dict[str, dict[str, Any]],
     scopes: dict[str, list[str]],
     candidates: dict[str, list[str]],
+    since: date | None = None,
 ) -> dict[str, dict[str, dict[str, Any]]]:
     """Each candidate's effect on the pools it would join, before it is submitted.
 
     ``scopes`` names pools of submitted Alphas (all of them, one partition); ``candidates``
     maps each candidate to the scopes it would join. Returns, by candidate and scope, the
     pool's in-sample figures ``before`` and ``after`` it joins, combined as :func:`compute`
-    combines them: equal weight over the Alphas already trading each day. Laid out once for
-    every pool and candidate together, so a page of candidates costs one frame.
+    combines them: equal weight over the Alphas already trading each day. With ``since``, the
+    same figures over the days from then on as ``recent_before`` and ``recent_after``. Laid
+    out once for every pool and candidate together, so a page of candidates costs one frame.
     """
     pooled = {a for ids in scopes.values() for a in ids}
     ids = [a for a in dict.fromkeys([*pooled, *candidates]) if series.get(a)]
     if not ids:
         return {}
     column = {a: i for i, a in enumerate(ids)}
-    _, pnl, turnover = exported(*frame(series, meta, ids))
+    dates, pnl, turnover = exported(*frame(series, meta, ids))
     filled = np.nan_to_num(pnl)
     started = np.maximum.accumulate((filled != 0) | (turnover != 0), axis=0)
+    recent = (
+        np.array(dates, dtype="datetime64[D]") >= np.datetime64(since, "D")
+        if since is not None
+        else None
+    )
 
-    def figures(cols: list[int]) -> dict[str, Any] | None:
+    def figures(cols: list[int]) -> dict[str, Any]:
         if not cols:
-            return None
+            return {"all": None, "recent": None}
         live = np.maximum(started[:, cols].sum(axis=1), 1)
         book = filled[:, cols].sum(axis=1) / live
         traded = turnover[:, cols].sum(axis=1) / live
         found = metrics.stats(book, traded)
-        return None if found is None else asdict(found)
+        late = None if recent is None else metrics.stats(book[recent], traded[recent], trim=False)
+        return {
+            "all": None if found is None else asdict(found),
+            "recent": None if late is None else asdict(late),
+        }
 
     columns = {
         name: [column[a] for a in members if a in column] for name, members in scopes.items()
@@ -142,15 +153,18 @@ def what_if(
     for candidate, joins in candidates.items():
         if candidate not in column:
             continue
-        out[candidate] = {
-            name: {
+        out[candidate] = {}
+        for name in joins:
+            if name not in columns:
+                continue
+            after = figures([*columns[name], column[candidate]])
+            out[candidate][name] = {
                 "members": len(columns[name]),
-                "before": before[name],
-                "after": figures([*columns[name], column[candidate]]),
+                "before": before[name]["all"],
+                "after": after["all"],
+                "recent_before": before[name]["recent"],
+                "recent_after": after["recent"],
             }
-            for name in joins
-            if name in columns
-        }
     return out
 
 

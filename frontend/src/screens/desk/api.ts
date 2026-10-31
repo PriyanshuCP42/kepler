@@ -18,6 +18,15 @@ export interface Effect {
   /** `null` for a partition none of your alphas is in yet. */
   before: Figures | null
   after: Figures | null
+  /** The same over the recent years, the nearest to what BRAIN's Combined Alpha Performance
+   *  is measured on. */
+  recentBefore: Figures | null
+  recentAfter: Figures | null
+}
+
+export interface YearSharpe {
+  year: number
+  sharpe: number | null
 }
 
 export interface Pyramid {
@@ -27,7 +36,7 @@ export interface Pyramid {
   multiplier: number | null
 }
 
-export type Readiness = 'ready' | 'check' | 'hurts' | 'overfit' | 'blocked'
+export type Readiness = 'ready' | 'check' | 'hurts' | 'fading' | 'overfit' | 'blocked'
 
 export interface NeighbourResult {
   kind: string
@@ -52,6 +61,9 @@ export interface GuardView {
   positiveYears: number
   testDays: number | null
   testWithoutSpike: number | null
+  recentYears: YearSharpe[]
+  recentSharpe: number | null
+  fullSharpe: number | null
 }
 
 export interface Candidate {
@@ -82,6 +94,10 @@ export interface Desk {
   unmeasured: number
   prodCeiling: number
   selfCeiling: number
+  /** Your whole pool's combined Sharpe in each backtest year. */
+  poolYears: YearSharpe[]
+  recentFrom: number
+  recentTo: number
 }
 
 export const DESK_KEY = ['desk'] as const
