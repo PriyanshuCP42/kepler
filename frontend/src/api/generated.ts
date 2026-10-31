@@ -3333,12 +3333,13 @@ export interface components {
              * Readiness
              * @enum {string}
              */
-            readiness: "ready" | "check" | "hurts" | "fading" | "overfit" | "fails_check" | "blocked";
+            readiness: "ready" | "check" | "hurts" | "fading" | "overfit" | "off_theme" | "fails_check" | "blocked";
             /** Reasons */
             reasons: string[];
             /** Region */
             region: string | null;
             repairOf?: components["schemas"]["Lineage"] | null;
+            route?: components["schemas"]["PowerPoolRoute"] | null;
             /** Sharpe */
             sharpe: number | null;
             submission?: components["schemas"]["SubmissionCheck"] | null;
@@ -3736,6 +3737,8 @@ export interface components {
             selfCeiling: number;
             /** Submitted */
             submitted: number;
+            /** Themes */
+            themes?: components["schemas"]["ThemeOut"][];
             /** Unmeasured */
             unmeasured: number;
         };
@@ -5238,6 +5241,16 @@ export interface components {
             universe: string;
             /** Universes */
             universes?: string[];
+        };
+        /**
+         * PowerPoolRoute
+         * @description How BRAIN can take this alpha: as a regular alpha, or only as pure Power Pool.
+         */
+        PowerPoolRoute: {
+            /** Missed */
+            missed: string[];
+            /** Theme */
+            theme: string | null;
         };
         /**
          * PowerPoolRow
@@ -6758,6 +6771,21 @@ export interface components {
             /** Problem */
             problem?: string | null;
             tree?: components["schemas"]["TreeNode"] | null;
+        };
+        /** ThemeOut */
+        ThemeOut: {
+            /** Delay */
+            delay: number | null;
+            /** Id */
+            id: string;
+            /** Multiplier */
+            multiplier: number;
+            /** Name */
+            name: string;
+            /** Qualifier */
+            qualifier: string | null;
+            /** Region */
+            region: string | null;
         };
         /** ThreadScope */
         ThreadScope: {

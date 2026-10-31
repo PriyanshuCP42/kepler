@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 
 from ..agents import guard
+from ..agents import themes as power_route
 from ..agents.repair import BY_ID as REPAIR_MOVES
 from ..brain.platform import (
     IGNORED_CHECKS,
@@ -51,7 +52,9 @@ WHOLE = "all"
 #: Performance combines.
 POWER = "Power Pool"
 
-Readiness = Literal["ready", "check", "hurts", "fading", "overfit", "fails_check", "blocked"]
+Readiness = Literal[
+    "ready", "check", "hurts", "fading", "overfit", "off_theme", "fails_check", "blocked"
+]
 
 
 class Figures(Out):
@@ -194,6 +197,24 @@ class Lineage(Out):
     name: str
 
 
+class ThemeOut(Out):
+    id: str
+    name: str
+    multiplier: float
+    region: str | None
+    delay: int | None
+    qualifier: str | None
+
+
+class PowerPoolRoute(Out):
+    """How BRAIN can take this alpha: as a regular alpha, or only as pure Power Pool."""
+
+    #: The regular limits it misses, which only a pure Power Pool submission forgives.
+    missed: list[str]
+    #: This month's theme covering its market, if any.
+    theme: str | None
+
+
 class Candidate(Out):
     alpha_id: str
     region: str | None
@@ -215,6 +236,7 @@ class Candidate(Out):
     submission: SubmissionCheck | None = None
     fix: Fix | None = None
     repair_of: Lineage | None = None
+    route: PowerPoolRoute | None = None
     pyramid: Pyramid | None
     readiness: Readiness
     reasons: list[str]
@@ -227,6 +249,8 @@ class Desk(Out):
     unmeasured: int
     prod_ceiling: float
     self_ceiling: float
+    #: This month's Power Pool themes, read from the newest alphas' checks.
+    themes: list[ThemeOut] = Field(default_factory=list)
     #: Your whole pool's combined Sharpe in each backtest year.
     pool_years: list[YearSharpe]
     recent_from: int
@@ -423,6 +447,7 @@ def judge(
     view: GuardView | None = None,
     test_sharpe: float | None = None,
     submission: SubmissionCheck | None = None,
+    route: PowerPoolRoute | None = None,
 ) -> tuple[Readiness, list[str]]:
     """Ready, check first, lowers the pool, fading, overfit, fails BRAIN's submission check, or
     blocked, with why."""
@@ -433,6 +458,13 @@ def judge(
     if pool is not None and pool >= SELF_CORRELATION_CEILING:
         return "blocked", [
             f"Correlates {pool:.2f} with your pool; BRAIN's limit is {SELF_CORRELATION_CEILING}."
+        ]
+    if route is not None and route.missed and route.theme is None:
+        return "off_theme", [
+            f"Misses the regular limits ({', '.join(route.missed)}), so BRAIN takes it only as "
+            "a pure Power Pool alpha, and no Power Pool theme covers its market this month. "
+            "Held, not dropped: it becomes submittable as it is in a month whose theme covers "
+            "its market."
         ]
     if submission is not None and submission.status == "fails":
         failed = "; ".join(_check_text(c) for c in submission.failing)
@@ -471,6 +503,14 @@ def judge(
     if hurts:
         return "hurts", reasons
     pending = [] if prod is not None else ["Production Correlation not checked yet."]
+    theme_note = (
+        [
+            f"Pure Power Pool in this month's {route.theme} theme: submit it with a Power Pool "
+            "description of 100 characters or more."
+        ]
+        if route is not None and route.missed and route.theme
+        else []
+    )
     # BRAIN's own submission check is the last step, run by you before submitting; until then
     # what the simulation only warned on is passed on as a caution, not held against it.
     caution: list[str] = []
@@ -484,9 +524,9 @@ def judge(
     if view is not None and view.status in _GUARD_PENDING:
         pending.append(_GUARD_PENDING[view.status])
     if pending:
-        return "check", [*pending, *caution, *reasons]
+        return "check", [*pending, *theme_note, *caution, *reasons]
     held = [] if view is None else [f"{view.held} of {view.measured} neighbours held."]
-    return "ready", [f"Production Correlation {prod:.2f}.", *held, *caution, *reasons]
+    return "ready", [f"Production Correlation {prod:.2f}.", *held, *theme_note, *caution, *reasons]
 
 
 def describe(before: Figures, after: Figures) -> str:
@@ -614,6 +654,7 @@ async def desk(state: State) -> Desk:
     categories, niches = await _pyramids(state)
 
     repair_moves = {key: move.name for key, move in REPAIR_MOVES.items()}
+    month_themes = await state.themes.current()
     out: list[Candidate] = []
     for v in chosen:
         row = stored[v.alpha_id]
@@ -650,6 +691,29 @@ async def desk(state: State) -> Desk:
         submission = submission_of(
             held.body if held else None, held.fetched_at if held else None, checks[v.alpha_id]
         )
+        live = (
+            [
+                c
+                for c in ((held.body or {}).get("is") or {}).get("checks") or []
+                if isinstance(c, dict)
+            ]
+            if held
+            else checks[v.alpha_id]
+        )
+        missed = power_route.needs_power_pool(live)
+        covering = next(
+            (
+                t
+                for t in month_themes
+                if t.covers(row.get("region"), row.get("delay"), row.get("universe"))
+            ),
+            None,
+        )
+        route = (
+            PowerPoolRoute(missed=missed, theme=covering.name if covering else None)
+            if missed and powered[v.alpha_id] and month_themes
+            else None
+        )
         readiness, reasons = judge(
             prod.get(v.alpha_id),
             v.pool_correlation,
@@ -657,6 +721,7 @@ async def desk(state: State) -> Desk:
             view,
             row.get("test_sharpe"),
             submission,
+            route,
         )
         out.append(
             Candidate(
@@ -676,6 +741,7 @@ async def desk(state: State) -> Desk:
                 effects=found,
                 guard=view,
                 submission=submission,
+                route=route,
                 fix=fix_for(submission, powered[v.alpha_id], v.alpha_id in repaired_origins),
                 repair_of=Lineage(
                     origin=parent.origin_alpha_id,
@@ -703,6 +769,7 @@ async def desk(state: State) -> Desk:
         ],
         recent_from=guard.RECENT_YEARS[0],
         recent_to=guard.RECENT_YEARS[-1],
+        themes=[ThemeOut.model_validate(asdict(t)) for t in month_themes],
         ready_ids=ready,
         ready_impact=basket,
     )
@@ -768,9 +835,10 @@ def _guard_view(
 
 
 _ORDER: dict[Readiness, int] = {
-    "ready": 6,
-    "check": 5,
-    "fails_check": 4,
+    "ready": 7,
+    "check": 6,
+    "fails_check": 5,
+    "off_theme": 4,
     "hurts": 3,
     "fading": 2,
     "overfit": 1,

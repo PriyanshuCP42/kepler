@@ -27,6 +27,7 @@ from .agents.overlap import Overlap
 from .agents.repair import RepairEngineer
 from .agents.screener import Screener
 from .agents.strategist import Strategist
+from .agents.themes import Themes
 from .brain.client import BrainClient
 from .brain.endpoints import BrainEndpoints
 from .brain.errors import BrainError, BrainTransportError
@@ -168,6 +169,7 @@ class AppState:
         self.hypotheses = HypothesisWriter(self, self.agents)
         self.allocator = Allocator(self, self.agents)
         self.genius = GeniusSync(self, self.agents)
+        self.themes = Themes(self)
 
         self._renew_lock = asyncio.Lock()
         self._last_session_check = float("-inf")

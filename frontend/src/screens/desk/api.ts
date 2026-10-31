@@ -52,6 +52,7 @@ export type Readiness =
   | 'hurts'
   | 'fading'
   | 'overfit'
+  | 'off_theme'
   | 'fails_check'
   | 'blocked'
 
@@ -115,6 +116,22 @@ export interface Lineage {
   name: string
 }
 
+/** One of this month's Power Pool themes. */
+export interface PowerPoolTheme {
+  id: string
+  name: string
+  multiplier: number
+  region: string | null
+  delay: number | null
+  qualifier: string | null
+}
+
+/** How BRAIN can take an alpha: regular, or only as pure Power Pool in a theme market. */
+export interface PowerPoolRoute {
+  missed: string[]
+  theme: string | null
+}
+
 export interface Candidate {
   alphaId: string
   region: string | null
@@ -136,6 +153,7 @@ export interface Candidate {
   submission?: SubmissionCheck | null
   fix?: Fix | null
   repairOf?: Lineage | null
+  route?: PowerPoolRoute | null
   pyramid: Pyramid | null
   readiness: Readiness
   reasons: string[]
@@ -153,6 +171,7 @@ export interface Desk {
   recentTo: number
   /** Submitting every Ready candidate together: your whole pool, then your Power Pool alphas,
    *  before and after. Absent from a backend older than this screen. */
+  themes?: PowerPoolTheme[]
   readyIds?: string[]
   readyImpact?: Effect[]
 }

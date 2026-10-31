@@ -30,6 +30,7 @@ import {
   type Effect,
   type Figures,
   type GuardView,
+  type PowerPoolTheme,
   type Readiness,
   type SubmissionCheck,
   type YearSharpe,
@@ -84,6 +85,11 @@ const READINESS: Record<Readiness, { label: string; tone: Tone; note: string }> 
     label: 'Fails Check',
     tone: 'loss',
     note: "BRAIN's own submission check refuses it. Repair it, or write its Power Pool description.",
+  },
+  off_theme: {
+    label: 'Off-theme',
+    tone: 'muted',
+    note: "Pure Power Pool outside this month's themes: held until a theme covers its market.",
   },
   overfit: {
     label: 'Overfit',
@@ -219,6 +225,7 @@ export function DeskScreen() {
             />
             <PoolYears years={data.poolYears} from={data.recentFrom} to={data.recentTo} />
           </div>
+          <ThemeStrip themes={data.themes} />
           <CandidatesPanel
             candidates={data.candidates}
             span={`${data.recentFrom ?? 2021}–${data.recentTo ?? 2023}`}
@@ -227,6 +234,33 @@ export function DeskScreen() {
         </>
       )}
     </Page>
+  )
+}
+
+function ThemeStrip({ themes }: { themes: PowerPoolTheme[] | undefined }) {
+  if (!themes?.length) return null
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-sm border border-hairline bg-surface-1 px-3 py-2 text-body-compact">
+      <span className="text-ink-subtle">This month's Power Pool themes</span>
+      {themes.map((t) => (
+        <Tooltip
+          key={t.id}
+          content={`${t.name}. An alpha under the regular limits is taken only as pure Power Pool, with a description of 100+ characters, in a theme's market${t.qualifier ? ` (${t.qualifier})` : ''}.`}
+        >
+          <span className="inline-flex items-center gap-1.5 rounded-pill bg-surface-3 px-2.5 py-0.5">
+            <span className="num text-ink">
+              {[t.region, isNum(t.delay) ? `D${t.delay}` : null, t.qualifier]
+                .filter(Boolean)
+                .join(' ')}
+            </span>
+            <span className={cn('num text-caption', TEXT_TONE.profit)}>×{t.multiplier}</span>
+          </span>
+        </Tooltip>
+      ))}
+      <span className="text-caption text-ink-subtle">
+        Searches lean here; alphas outside them that need Power Pool are held.
+      </span>
+    </div>
   )
 }
 
@@ -425,7 +459,7 @@ function Change({ effect, recent = false }: { effect: Effect | undefined; recent
   )
 }
 
-type View = 'worth' | 'ready' | 'refused' | 'aside' | 'all'
+type View = 'worth' | 'ready' | 'refused' | 'held' | 'aside' | 'all'
 
 const VIEWS: Record<View, { label: string; keep: (c: Candidate) => boolean }> = {
   worth: {
@@ -434,6 +468,7 @@ const VIEWS: Record<View, { label: string; keep: (c: Candidate) => boolean }> = 
   },
   ready: { label: 'Ready', keep: (c) => c.readiness === 'ready' },
   refused: { label: 'Fails Check', keep: (c) => c.readiness === 'fails_check' },
+  held: { label: 'Off-theme', keep: (c) => c.readiness === 'off_theme' },
   aside: {
     label: 'Set aside',
     keep: (c) => ['hurts', 'fading', 'overfit', 'blocked'].includes(c.readiness),
@@ -451,7 +486,13 @@ function CandidatesPanel({
   submitted: number
 }) {
   const [open, setOpen] = useState<string | null>(null)
-  const [view, setView] = useState<View>('worth')
+  // The first view with something in it, until you pick one: an empty "Worth a look"
+  // never greets you, even as candidates come and go.
+  const [chosen, setView] = useState<View | null>(null)
+  const view =
+    chosen ??
+    (['worth', 'held', 'all'] as View[]).find((v) => candidates.some(VIEWS[v].keep)) ??
+    'all'
   const shown = candidates.filter(VIEWS[view].keep)
   return (
     <Panel
@@ -885,7 +926,7 @@ function Details({ candidate }: { candidate: Candidate }) {
           </span>
         ))}
       </div>
-      {candidate.fix && (
+      {candidate.fix && candidate.readiness === 'fails_check' && (
         <p className="text-body-compact text-pretty text-ink">
           <span className={cn('font-medium', TEXT_TONE[FIX_LABELS[candidate.fix.action].tone])}>
             {FIX_LABELS[candidate.fix.action].label}:

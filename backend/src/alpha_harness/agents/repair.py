@@ -39,6 +39,7 @@ from ..labs.launch import AddedTask, add_study
 from ..labs.params import REPAIR_SAMPLER, RepairParams
 from ..tools import correlation_breaker, settings_sampler
 from ..vault.yields import REFUSING, checks_of
+from .themes import takeable
 
 if TYPE_CHECKING:
     from .bus import AgentBus
@@ -521,9 +522,10 @@ class RepairEngineer:
             )
             verdicts = {v.alpha_id: v.verdict for v in judged}
             placed = {v.alpha_id for v in judged if v.family_checked_at is not None}
+            blocked = await self._untakeable([a for a, v in verdicts.items() if v == "pass"])
             for attempt in open_attempts:
                 trial = trials.get((attempt.study_id, attempt.trial_number))
-                outcome = _outcome(trial, verdicts, placed)
+                outcome = _outcome(trial, verdicts, placed, blocked)
                 if outcome is None:
                     continue
                 attempt.outcome, attempt.settled_at = outcome, utcnow()
@@ -542,20 +544,32 @@ class RepairEngineer:
                     self.bus.handoff("repair", "critic", "fixed", 1, "repaired and passing")
         return settled
 
+    async def _untakeable(self, alpha_ids: list[str]) -> set[str]:
+        """Those of these alphas BRAIN cannot take: under the regular limits, and not a Power
+        Pool alpha in a market this month's themes cover (see :mod:`.themes`)."""
+        if not alpha_ids:
+            return set()
+        themes = await self.state.themes.current()
+        rows = await self.state.alphas.by_ids(alpha_ids)
+        return {a for a, row in rows.items() if not takeable(row, themes)}
+
     async def _correct(self) -> int:
-        """Turn back fixes whose Alpha no longer passes, e.g. found to repeat your pool."""
+        """Turn back fixes whose Alpha no longer passes, e.g. found to repeat your pool, or
+        that BRAIN cannot take: one still under the regular limits outside a theme market."""
         async with self.state.db.session() as session:
-            wrong = (
-                (
-                    await session.execute(
-                        select(RepairAttempt)
-                        .join(CriticVerdict, CriticVerdict.alpha_id == RepairAttempt.alpha_id)
-                        .where(RepairAttempt.outcome == "fixed", CriticVerdict.verdict != "pass")
+            fixed = list(
+                await session.scalars(select(RepairAttempt).where(RepairAttempt.outcome == "fixed"))
+            )
+            ids = [a.alpha_id for a in fixed if a.alpha_id]
+            passing = set(
+                await session.scalars(
+                    select(CriticVerdict.alpha_id).where(
+                        CriticVerdict.alpha_id.in_(ids), CriticVerdict.verdict == "pass"
                     )
                 )
-                .scalars()
-                .all()
             )
+            blocked = await self._untakeable(list(passing))
+            wrong = [a for a in fixed if a.alpha_id not in passing or a.alpha_id in blocked]
             for attempt in wrong:
                 attempt.outcome = "not_fixed"
                 stat = await session.get(RepairStat, (attempt.failure, attempt.move))
@@ -611,7 +625,10 @@ def interleave(rows: list[tuple[str, Any]]) -> list[str]:
 
 
 def _outcome(
-    trial: Trial | None, verdicts: dict[str, str], placed: frozenset[str] | set[str] = frozenset()
+    trial: Trial | None,
+    verdicts: dict[str, str],
+    placed: frozenset[str] | set[str] = frozenset(),
+    blocked: frozenset[str] | set[str] = frozenset(),
 ) -> str | None:
     """A finished repair's outcome, or ``None`` while it is still out or not judged.
 
@@ -629,6 +646,8 @@ def _outcome(
         if verdict is None:
             return None
         if verdict == "pass":
+            if trial.alpha_id in blocked:
+                return "not_fixed"  # passes the Critic, yet BRAIN cannot take it
             return "fixed" if trial.alpha_id in placed else None
         return "not_fixed"
     if trial.state == TrialState.FAIL:

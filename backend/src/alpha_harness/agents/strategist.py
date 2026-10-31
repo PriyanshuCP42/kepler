@@ -52,6 +52,9 @@ PRIOR_SHAPE = 0.5
 PRIOR_RATE = 1.5
 #: The history is rebuilt at most this often; the grid refreshes on its own schedule.
 HISTORY_SECONDS = 1800
+#: A niche in a market this month's Power Pool theme covers is boosted by this much per unit
+#: of the theme's multiplier: GLB at 1 by half again, ASI at 2 twice over.
+THEME_BOOST = 0.5
 #: Your own hypotheses, as a boost to a niche's score: (region, category) -> factor.
 HYPOTHESES: dict[tuple[str, str], float] = {("USA", "risk"): 1.3, ("GLB", "risk"): 1.3}
 NEUTRALIZATIONS = ("SUBINDUSTRY", "INDUSTRY", "SECTOR", "MARKET")
@@ -102,13 +105,26 @@ class Niche:
         return out
 
 
-def assess(niches: list[Niche], rng: random.Random | None = None) -> list[Niche]:
-    """Score every niche and return them best first. Pure apart from the random draws."""
+def assess(
+    niches: list[Niche],
+    rng: random.Random | None = None,
+    themes: dict[tuple[str, int], tuple[str, float]] | None = None,
+) -> list[Niche]:
+    """Score every niche and return them best first. Pure apart from the random draws.
+
+    ``themes`` maps a market (region, delay) to this month's Power Pool theme there and its
+    multiplier: only in such a market can an alpha under the regular limits be submitted, so
+    its niches are boosted by :data:`THEME_BOOST` per unit of multiplier.
+    """
     rng = rng or random.Random()
     for niche in niches:
         niche.reasons = []
         niche.value = (niche.multiplier or 1.0) * need(niche.submitted)
         niche.boost = HYPOTHESES.get((niche.region, niche.category), 1.0)
+        theme = (themes or {}).get((niche.region, niche.delay))
+        if theme is not None:
+            niche.boost *= 1 + THEME_BOOST * theme[1]
+            niche.reasons.append(f"This month's {theme[0]} Power Pool theme covers it.")
         shape = PRIOR_SHAPE + niche.families
         rate = PRIOR_RATE + niche.simulations / 100
         niche.expected = shape / rate
@@ -135,7 +151,7 @@ def assess(niches: list[Niche], rng: random.Random | None = None) -> list[Niche]
             niche.reasons.append(
                 f"{left} more submitted Alpha{'s' if left > 1 else ''} completes it."
             )
-        if niche.boost > 1:
+        if HYPOTHESES.get((niche.region, niche.category), 1.0) > 1:
             niche.reasons.append("One of your hypotheses.")
     return sorted(niches, key=lambda n: n.score, reverse=True)
 
@@ -203,7 +219,12 @@ class Strategist:
         plan shown is the plan written; it moves when the day or the history does."""
         if seed is None:
             seed = platform_midnight().date().toordinal()
-        return assess(await self.niche_map(), random.Random(seed))
+        themes = {
+            (t.region, t.delay): (t.name, t.multiplier)
+            for t in await self._themes()
+            if t.region is not None and t.delay is not None
+        }
+        return assess(await self.niche_map(), random.Random(seed), themes)
 
     async def _load_history(self) -> dict[tuple[str, int, str], dict[str, int]]:
         """Per niche: simulations, Critic passes and new families, all time and recent."""
@@ -295,8 +316,15 @@ class Strategist:
             )
         return {"added": added, "skipped": skipped}
 
+    async def _themes(self) -> list[Any]:
+        source = getattr(self.state, "themes", None)
+        return await source.current() if source is not None else []
+
     async def market(self, niche: dict[str, Any], schema: dict[str, Any]) -> dict[str, Any] | None:
-        """The universe, the least crowded datasets and the neutralizations for one niche."""
+        """The universe, the least crowded datasets and the neutralizations for one niche.
+
+        In a market whose Power Pool theme names a universe (ASI D1 MINVOL10M), that universe,
+        so what it finds can be submitted as pure Power Pool."""
         rows = await self.state.catalog.query(
             "SELECT dataset_id, universe, coalesce(alpha_count, 0) AS alphas, "
             "coalesce(coverage, 0) AS coverage, coalesce(field_count, 0) AS fields "
@@ -307,6 +335,13 @@ class Strategist:
             return None
         universes = Counter(str(r["universe"]) for r in rows)
         universe = max(universes, key=lambda u: (universes[u], _size(u)))
+        for theme in await self._themes():
+            if (
+                theme.region == niche["region"]
+                and theme.delay == niche["delay"]
+                and theme.universe in universes
+            ):
+                universe = theme.universe
         in_universe = [r for r in rows if str(r["universe"]) == universe and r["fields"] > 0]
         # Least crowded first: an Alpha on data few others use correlates less with the pool.
         in_universe.sort(key=lambda r: (r["alphas"], -r["coverage"]))

@@ -48,6 +48,7 @@ from ..db.models import (
 )
 from ..labs.launch import lab_of
 from . import guard
+from .themes import takeable
 
 if TYPE_CHECKING:
     from .bus import AgentBus
@@ -333,12 +334,20 @@ class Allocator:
                 passes[lab].append(str(alpha_id))
         every = [a for ids in passes.values() for a in ids]
         series = await self.state.alphas.series(every) if every else {}
+        # A pass BRAIN cannot take (under the regular limits outside a theme market) is not good.
+        themes = await self.state.themes.current()
+        rows = await self.state.alphas.by_ids(every) if every else {}
         out: dict[str, tuple[int, int, int]] = {}
         for lab, n in sims.items():
             good = 0
             for alpha_id in passes[lab]:
                 form = guard.recent_form(series.get(alpha_id) or {})
-                if form.recent is not None and not form.fading and not form.weak_years:
+                if (
+                    form.recent is not None
+                    and not form.fading
+                    and not form.weak_years
+                    and takeable(rows.get(alpha_id) or {}, themes)
+                ):
                     good += 1
             out[lab] = (n, len(passes[lab]), good)
         return out
