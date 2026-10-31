@@ -6,7 +6,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from '@tanstack/react-router'
-import { RefreshCwIcon, ScaleIcon, WrenchIcon } from 'lucide-react'
+import { CompassIcon, RefreshCwIcon, ScaleIcon, WrenchIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import { errorMessage } from '@/api/http'
 import { cn } from '@/lib/cn'
@@ -17,15 +17,18 @@ import {
   AUTOPILOT_KEY,
   autopilot,
   type Gate,
+  type Niche,
   type PreScreen,
   REPAIR_KEY,
   type RepairSummary,
   type ShortlistEntry,
+  STRATEGIST_KEY,
   type Stage,
 } from '@/screens/autopilot/api'
 import {
   Badge,
   Button,
+  Disclosure,
   Empty,
   ErrorNotice,
   LINK,
@@ -103,6 +106,7 @@ export function AutopilotScreen() {
             <FunnelPanel stages={data.funnel} />
             <PreScreenPanel prescreen={data.prescreen} />
           </div>
+          <StrategistPanel />
           <RepairPanel />
           <ShortlistPanel entries={data.shortlist} />
         </>
@@ -232,6 +236,125 @@ function PreScreenPanel({ prescreen }: { prescreen: PreScreen }) {
         </p>
       </div>
     </Panel>
+  )
+}
+
+// ── Strategist ──────────────────────────────────────────────────────────────────────────
+
+const NICHE_STATUS: Record<Niche['status'], { label: string; tone: Tone }> = {
+  ready: { label: 'Ready', tone: 'neutral' },
+  untried: { label: 'Untried', tone: 'warn' },
+  stalled: { label: 'Stalled', tone: 'loss' },
+  not_downloaded: { label: 'No data', tone: 'muted' },
+}
+
+function StrategistPanel() {
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const query = useQuery({
+    queryKey: STRATEGIST_KEY,
+    queryFn: autopilot.strategist,
+    refetchInterval: 5 * 60_000,
+  })
+  const write = useMutation({
+    mutationFn: () => autopilot.writePlan(),
+    onSuccess: (result) => {
+      void queryClient.invalidateQueries({ queryKey: ['lab-tasks'] })
+      const sims = result.added.reduce((sum, t) => sum + t.simulations, 0)
+      const skipped = result.skipped.map((s) => `${s.niche}: ${s.reason}`).join(' ')
+      toast.success(
+        `${fmt.int(result.added.length)} Search Lab tasks added, ${fmt.int(sims)} simulations`,
+        {
+          description: `Not started; run them from Tasks.${skipped ? ` Skipped ${skipped}` : ''}`,
+          action: { label: 'Open Tasks', onClick: () => void navigate({ to: '/tasks' }) },
+        },
+      )
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  })
+  const data = query.data
+
+  return (
+    <Panel
+      title="Strategist"
+      description="Which pyramids get the next simulations: worth to your Genius bars × families each one has produced, with stalled niches cooled and one place kept for an untried one."
+      actions={
+        <Button
+          variant="primary"
+          loading={write.isPending}
+          disabled={!data || data.plan.length === 0}
+          onClick={() => write.mutate()}
+        >
+          <CompassIcon />
+          Write Plan Tasks
+        </Button>
+      }
+    >
+      {query.isError && !data ? (
+        <ErrorNotice error={query.error} title="Could not load the Strategist" />
+      ) : !data ? (
+        <Skeleton className="h-40" label="Building the niche map" />
+      ) : (
+        <div className="flex flex-col gap-4">
+          <NicheTable niches={data.plan} planned />
+          <Disclosure summary={`Niche map · ${fmt.int(data.niches.length)} pyramids`}>
+            <NicheTable niches={data.niches.slice(0, 40)} />
+          </Disclosure>
+        </div>
+      )}
+    </Panel>
+  )
+}
+
+function NicheTable({ niches, planned = false }: { niches: Niche[]; planned?: boolean }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-body-compact">
+        <thead>
+          <tr className="text-left text-caption text-ink-subtle">
+            <th className="py-1.5 pr-3 font-medium">Pyramid</th>
+            <th className="py-1.5 pr-3 text-right font-medium">Multiplier</th>
+            <th className="py-1.5 pr-3 text-right font-medium">This Quarter</th>
+            <th className="py-1.5 pr-3 text-right font-medium">Simulated</th>
+            <th className="py-1.5 pr-3 text-right font-medium">Families</th>
+            <th className="py-1.5 pr-3 text-right font-medium">Per 100</th>
+            <th className="py-1.5 pr-3 font-medium">Status</th>
+            <th className="py-1.5 text-right font-medium">{planned ? 'Planned' : 'Score'}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {niches.map((n) => {
+            const status = NICHE_STATUS[n.status]
+            return (
+              <tr
+                key={`${n.region}:${n.delay}:${n.category}`}
+                className="border-t border-hairline"
+                title={n.reasons.join(' ')}
+              >
+                <td className="py-1.5 pr-3 text-ink">
+                  {n.region} · D{n.delay} · {n.categoryName}
+                </td>
+                <td className="py-1.5 pr-3 text-right num">
+                  {isNum(n.multiplier) ? `${fmt.ratio(n.multiplier, 1)}×` : DASH}
+                </td>
+                <td className="py-1.5 pr-3 text-right num">{fmt.int(n.submitted)} / 3</td>
+                <td className="py-1.5 pr-3 text-right num">{fmt.int(n.simulations)}</td>
+                <td className="py-1.5 pr-3 text-right num">{fmt.int(n.families)}</td>
+                <td className="py-1.5 pr-3 text-right num">{fmt.ratio(n.expected, 2)}</td>
+                <td className="py-1.5 pr-3">
+                  <Badge tone={status.tone}>{status.label}</Badge>
+                </td>
+                <td className="py-1.5 text-right num">
+                  {planned
+                    ? `${fmt.int(n.simulationsPlanned ?? 0)} · ${fmt.pct(n.share, 0)}`
+                    : fmt.ratio(n.score, 2)}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
   )
 }
 

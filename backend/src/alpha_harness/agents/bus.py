@@ -94,9 +94,7 @@ ROSTER: tuple[Agent, ...] = (
         0,
         "live",
     ),
-    Agent(
-        "strategist", "Strategist", "Chooses which niches get today's simulations", 3, 1, "planned"
-    ),
+    Agent("strategist", "Strategist", "Chooses which niches get today's simulations", 3, 1, "live"),
     Agent(
         "hypothesis", "Hypothesis Writer", "Turns an economic idea into a template", 3, 2, "planned"
     ),

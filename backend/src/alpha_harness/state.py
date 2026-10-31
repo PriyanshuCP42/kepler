@@ -21,6 +21,7 @@ from .agents.critic import Critic
 from .agents.families import FamilyClerk
 from .agents.repair import RepairEngineer
 from .agents.screener import Screener
+from .agents.strategist import Strategist
 from .brain.client import BrainClient
 from .brain.endpoints import BrainEndpoints
 from .brain.errors import BrainError, BrainTransportError
@@ -156,6 +157,7 @@ class AppState:
 
         self.conductor = Conductor(self, self.agents, requeue)
         self.repair = RepairEngineer(self, self.agents)
+        self.strategist = Strategist(self, self.agents)
 
         self._renew_lock = asyncio.Lock()
         self._last_session_check = float("-inf")

@@ -78,7 +78,43 @@ export interface RepairTaskAdded {
   simulations: number
 }
 
+export interface Niche {
+  region: string
+  delay: number
+  category: string
+  categoryName: string
+  multiplier: number | null
+  /** Alphas submitted in it this quarter; three complete the pyramid. */
+  submitted: number
+  synced: boolean
+  simulations: number
+  passed: number
+  families: number
+  recentSimulations: number
+  recentPassed: number
+  status: 'ready' | 'untried' | 'stalled' | 'not_downloaded'
+  value: number
+  /** New families per 100 simulations, learned. */
+  expected: number
+  score: number
+  share: number
+  boost: number
+  reasons: string[]
+  simulationsPlanned: number | null
+}
+
+export interface StrategistView {
+  plan: Niche[]
+  niches: Niche[]
+}
+
+export interface StrategistTasks {
+  added: { id: number; niche: string; simulations: number; datasets: string[]; universe: string }[]
+  skipped: { niche: string; reason: string }[]
+}
+
 export const AUTOPILOT_KEY = ['autopilot'] as const
+export const STRATEGIST_KEY = ['autopilot', 'strategist'] as const
 export const REPAIR_KEY = ['autopilot', 'repair'] as const
 
 export const autopilot = {
@@ -88,6 +124,10 @@ export const autopilot = {
   /** Scores every alpha in the vault again. 409 while the Critic is already busy. */
   rescore: () => http.post<{ started: boolean }>('/api/agents/critic/rescore'),
   repair: () => http.get<RepairSummary>('/api/agents/repair'),
+  strategist: () => http.get<StrategistView>('/api/agents/strategist'),
+  /** One Search Lab task per planned niche, not started. */
+  writePlan: (niches = 5, simulations = 1500, cores = 4) =>
+    http.post<StrategistTasks>('/api/agents/strategist/tasks', { niches, simulations, cores }),
   /** Writes fixes for the best near misses as one task in Tasks, not started. */
   planRepairs: (alphas = 100, perAlpha = 3, cores = 4) =>
     http.post<RepairTaskAdded>('/api/agents/repair/tasks', { alphas, perAlpha, cores }),

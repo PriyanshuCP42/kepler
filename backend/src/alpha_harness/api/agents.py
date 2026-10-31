@@ -183,3 +183,74 @@ async def repair_task(body: RepairRequest, state: State) -> RepairTaskAdded:
         row = await session.get(Study, added.id)
         simulations = row.max_trials if row is not None else 0
     return RepairTaskAdded(id=added.id, name=added.name, simulations=simulations)
+
+
+class NicheView(Out):
+    region: str
+    delay: int
+    category: str
+    category_name: str
+    multiplier: float | None
+    #: Alphas submitted in it this quarter; three complete the pyramid.
+    submitted: int
+    synced: bool
+    simulations: int
+    passed: int
+    families: int
+    recent_simulations: int
+    recent_passed: int
+    #: ready | untried | stalled | not_downloaded
+    status: str
+    value: float
+    #: New families per 100 simulations, learned.
+    expected: float
+    score: float
+    share: float
+    boost: float
+    reasons: list[str]
+    simulations_planned: int | None = None
+
+
+class StrategistView(Out):
+    plan: list[NicheView]
+    #: Every niche, best first.
+    niches: list[NicheView]
+
+
+class StrategistRequest(BaseModel):
+    niches: int = Field(default=5, ge=1, le=12)
+    simulations: int = Field(default=1500, ge=100, le=20_000)
+    cores: int = Field(default=4, ge=1, le=8)
+
+
+class StrategistTasks(Out):
+    added: list[dict[str, Any]]
+    skipped: list[dict[str, Any]]
+
+
+@router.get("/strategist")
+async def strategist_view(state: State) -> StrategistView:
+    """Today's plan and the niche map it was chosen from."""
+    from ..agents.strategist import choose
+
+    ranked = await state.strategist.assessed()
+    plan = choose(list(ranked), 5)
+    total = 1500
+    return StrategistView(
+        plan=[
+            NicheView.model_validate(
+                n.to_dict() | {"simulationsPlanned": max(100, round(total * n.share))}
+            )
+            for n in plan
+        ],
+        niches=[NicheView.model_validate(n.to_dict()) for n in ranked],
+    )
+
+
+@router.post("/strategist/tasks", status_code=201)
+async def strategist_tasks(body: StrategistRequest, state: State) -> StrategistTasks:
+    """Write one Search Lab task per planned niche, not started."""
+    result = await state.strategist.add_tasks(body.niches, body.simulations, body.cores)
+    if not result["added"] and not result["skipped"]:
+        raise refuse(422, "nothing_to_plan", "No niche can be planned right now.")
+    return StrategistTasks.model_validate(result)

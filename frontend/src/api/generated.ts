@@ -121,6 +121,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agents/strategist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Strategist View
+         * @description Today's plan and the niche map it was chosen from.
+         */
+        get: operations["strategist_view_api_agents_strategist_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agents/strategist/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Strategist Tasks
+         * @description Write one Search Lab task per planned niche, not started.
+         */
+        post: operations["strategist_tasks_api_agents_strategist_tasks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/alphas/summary": {
         parameters: {
             query?: never;
@@ -4010,6 +4050,49 @@ export interface components {
             /** Trainsharpe */
             trainSharpe: number | null;
         };
+        /** NicheView */
+        NicheView: {
+            /** Boost */
+            boost: number;
+            /** Category */
+            category: string;
+            /** Categoryname */
+            categoryName: string;
+            /** Delay */
+            delay: number;
+            /** Expected */
+            expected: number;
+            /** Families */
+            families: number;
+            /** Multiplier */
+            multiplier: number | null;
+            /** Passed */
+            passed: number;
+            /** Reasons */
+            reasons: string[];
+            /** Recentpassed */
+            recentPassed: number;
+            /** Recentsimulations */
+            recentSimulations: number;
+            /** Region */
+            region: string;
+            /** Score */
+            score: number;
+            /** Share */
+            share: number;
+            /** Simulations */
+            simulations: number;
+            /** Simulationsplanned */
+            simulationsPlanned?: number | null;
+            /** Status */
+            status: string;
+            /** Submitted */
+            submitted: number;
+            /** Synced */
+            synced: boolean;
+            /** Value */
+            value: number;
+        };
         /** OfferedModels */
         OfferedModels: {
             /** Error */
@@ -5210,6 +5293,42 @@ export interface components {
             /** Templates */
             templates?: components["schemas"]["StatsItem"][];
         };
+        /** StrategistRequest */
+        StrategistRequest: {
+            /**
+             * Cores
+             * @default 4
+             */
+            cores: number;
+            /**
+             * Niches
+             * @default 5
+             */
+            niches: number;
+            /**
+             * Simulations
+             * @default 1500
+             */
+            simulations: number;
+        };
+        /** StrategistTasks */
+        StrategistTasks: {
+            /** Added */
+            added: {
+                [key: string]: unknown;
+            }[];
+            /** Skipped */
+            skipped: {
+                [key: string]: unknown;
+            }[];
+        };
+        /** StrategistView */
+        StrategistView: {
+            /** Niches */
+            niches: components["schemas"]["NicheView"][];
+            /** Plan */
+            plan: components["schemas"]["NicheView"][];
+        };
         /**
          * StudyStatus
          * @enum {string}
@@ -6215,6 +6334,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Shortlist"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    strategist_view_api_agents_strategist_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategistView"];
+                };
+            };
+        };
+    };
+    strategist_tasks_api_agents_strategist_tasks_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StrategistRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategistTasks"];
                 };
             };
             /** @description Validation Error */
