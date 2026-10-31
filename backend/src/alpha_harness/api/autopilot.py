@@ -1,12 +1,16 @@
 """Autopilot: today's research funnel, the Pre-screen, and the Critic's shortlist."""
 
+from collections import defaultdict
+from datetime import timedelta
 from typing import Any
 
 from fastapi import APIRouter
 from sqlalchemy import func, select
 
 from ..brain.filters import platform_midnight
-from ..db.models import CriticVerdict
+from ..db.models import CriticVerdict, SimulationRecord, Study
+from ..labs.launch import lab_of
+from ..labs.objectives import OBJECTIVES
 from ..schemas import Out
 from .agents import ShortlistEntry, shortlist
 from .deps import State, refuse
@@ -30,15 +34,29 @@ class PreScreen(Out):
     positives: int
     auc: float | None
     lift: float | None
+    target: str
     oversample: int
     explore_share: float
     screened_today: int
     kept_today: int
 
 
+class LabYield(Out):
+    lab: str
+    objective: str
+    tasks: int
+    #: Finished simulations the Critic has judged.
+    simulations: int
+    passed: int
+    near_misses: int
+    #: Critic passes per 1,000 judged simulations.
+    per_thousand: float
+
+
 class Autopilot(Out):
     funnel: list[Stage]
     prescreen: PreScreen
+    yields: list[LabYield]
     shortlist: list[ShortlistEntry]
 
 
@@ -107,6 +125,7 @@ async def overview(state: State) -> Autopilot:
     return Autopilot(
         funnel=funnel,
         prescreen=PreScreen.model_validate(screener.summary()),
+        yields=await lab_yields(state),
         shortlist=listed.alphas,
     )
 
@@ -117,3 +136,52 @@ async def train(state: State) -> Started:
     if not state.screener.retrain_in_background():
         raise refuse(409, "busy", "The Pre-screen is already training.")
     return Started(started=True)
+
+
+#: How far back the lab yields look.
+YIELD_DAYS = 14
+
+
+async def lab_yields(state: Any) -> list[LabYield]:
+    """Critic passes per 1,000 simulations, by lab and by what its tasks maximised.
+
+    Split by objective so a lab scored on the Critic Score can be set against the same lab
+    scored on Train Sharpe. Passes count after the Family Clerk: a pool repeat is not one.
+    """
+    since = platform_midnight() - timedelta(days=YIELD_DAYS)
+    async with state.db.session() as session:
+        rows = (
+            await session.execute(
+                select(SimulationRecord.task, Study.objectives, CriticVerdict.verdict)
+                .join(CriticVerdict, CriticVerdict.alpha_id == SimulationRecord.alpha_id)
+                .join(Study, Study.task == SimulationRecord.task)
+                .where(SimulationRecord.created_at >= since)
+            )
+        ).all()
+    groups: dict[tuple[str, str], dict[str, Any]] = defaultdict(
+        lambda: {"tasks": set(), "simulations": 0, "passed": 0, "near_misses": 0}
+    )
+    for task, objectives, verdict in rows:
+        lab = lab_of(task)
+        if lab is None:
+            continue
+        key = (objectives or [None])[0]
+        objective = OBJECTIVES[key].label if key in OBJECTIVES else str(key)
+        group = groups[lab, objective]
+        group["tasks"].add(task)
+        group["simulations"] += 1
+        group["passed"] += verdict == "pass"
+        group["near_misses"] += verdict == "near_miss"
+    out = [
+        LabYield(
+            lab=lab,
+            objective=objective,
+            tasks=len(g["tasks"]),
+            simulations=g["simulations"],
+            passed=g["passed"],
+            near_misses=g["near_misses"],
+            per_thousand=round(1000 * g["passed"] / g["simulations"], 1),
+        )
+        for (lab, objective), g in groups.items()
+    ]
+    return sorted(out, key=lambda y: y.per_thousand, reverse=True)

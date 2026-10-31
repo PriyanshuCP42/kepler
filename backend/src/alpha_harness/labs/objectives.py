@@ -6,6 +6,7 @@ from typing import Any
 
 from ..brain.schemas import QUICK_MODE, Alpha, SampleStats
 from ..vault.yields import without_quota_checks
+from .fastexpr import ParseError, operator_count, parse
 
 #: A missing number scores this: deliberately terrible, so a broken trial is never mistaken
 #: for a good one. Every objective is maximised.
@@ -24,6 +25,10 @@ class StudyNotFoundError(StudyError):
         self.study_id = study_id
 
 
+#: The objective computed from the whole row rather than read off one statistic.
+CRITIC = "train_critic"
+
+
 @dataclass(frozen=True, slots=True)
 class Objective:
     key: str
@@ -35,6 +40,9 @@ OBJECTIVES: dict[str, Objective] = {
     # Over the train years only, so the held-out test years stay unseen by the search.
     "train_sharpe": Objective("train_sharpe", "Train Sharpe"),
     "train_fitness": Objective("train_fitness", "Train Fitness"),
+    # The Critic's score on the train years, less for repeating your pool: see
+    # :func:`..agents.critic.search_score`.
+    CRITIC: Objective(CRITIC, "Critic Score"),
 }
 
 
@@ -113,4 +121,26 @@ def summarise(alpha: Alpha) -> dict[str, Any]:
         "checks": checks,
         "failedChecks": [c["name"] for c in checks if c["result"] == "FAIL"],
         "quick": alpha.settings is not None and alpha.settings.simulation_mode == QUICK_MODE,
+    }
+
+
+def alpha_row(alpha: Alpha, summary: dict[str, Any]) -> dict[str, Any]:
+    """The vault-row fields :func:`..agents.critic.search_score` reads, from BRAIN's reply,
+    for an Alpha the vault has not stored."""
+    stats, train = alpha.in_sample, alpha.train
+    expression = alpha.expression
+    try:
+        operators = operator_count(parse(expression)) if expression else None
+    except ParseError:
+        operators = None
+    return {
+        "sharpe": stats.sharpe if stats else None,
+        "fitness": stats.fitness if stats else None,
+        "margin": stats.margin if stats else None,
+        "train_sharpe": train.sharpe if train else None,
+        "train_fitness": train.fitness if train else None,
+        "operator_count": operators,
+        "checks": summary.get("checks") or [],
+        "expression": expression,
+        "region": alpha.settings.region if alpha.settings else None,
     }

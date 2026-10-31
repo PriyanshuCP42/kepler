@@ -2833,6 +2833,8 @@ export interface components {
             prescreen: components["schemas"]["PreScreen"];
             /** Shortlist */
             shortlist: components["schemas"]["ShortlistEntry"][];
+            /** Yields */
+            yields: components["schemas"]["LabYield"][];
         };
         /**
          * AvailabilityCounts
@@ -3934,6 +3936,23 @@ export interface components {
             /** Tasks */
             tasks: components["schemas"]["LabTask"][];
         };
+        /** LabYield */
+        LabYield: {
+            /** Lab */
+            lab: string;
+            /** Nearmisses */
+            nearMisses: number;
+            /** Objective */
+            objective: string;
+            /** Passed */
+            passed: number;
+            /** Perthousand */
+            perThousand: number;
+            /** Simulations */
+            simulations: number;
+            /** Tasks */
+            tasks: number;
+        };
         /** LastSync */
         LastSync: {
             /** Error */
@@ -4514,6 +4533,8 @@ export interface components {
             screenedToday: number;
             /** Status */
             status: string;
+            /** Target */
+            target: string;
             /** Trainedat */
             trainedAt: string | null;
         };

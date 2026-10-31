@@ -17,6 +17,7 @@ import {
   AUTOPILOT_KEY,
   autopilot,
   type Gate,
+  type LabYield,
   type Niche,
   type PreScreen,
   REPAIR_KEY,
@@ -37,6 +38,7 @@ import {
   PageHeader,
   Panel,
   Skeleton,
+  TEXT_TONE,
   type Tone,
 } from '@/ui/kit'
 
@@ -106,6 +108,7 @@ export function AutopilotScreen() {
             <FunnelPanel stages={data.funnel} />
             <PreScreenPanel prescreen={data.prescreen} />
           </div>
+          <YieldPanel yields={data.yields} />
           <StrategistPanel />
           <RepairPanel />
           <ShortlistPanel entries={data.shortlist} />
@@ -233,11 +236,65 @@ function PreScreenPanel({ prescreen }: { prescreen: PreScreen }) {
           <Metric boxed size="sm" label="Sent Today" value={fmt.int(prescreen.keptToday)} />
         </div>
         <p className="text-body-compact text-pretty text-ink-subtle">
-          Lift is how much more often the candidates it ranks in its top tenth pass BRAIN's checks
-          than candidates on average, measured on recent alphas it never trained on. At 1.0× it
-          picks no better than chance.
+          Lift is how much more often the candidates it ranks in its top tenth{' '}
+          {prescreen.target === 'critic' ? 'pass the Critic' : "pass BRAIN's checks"} than
+          candidates on average, measured on recent alphas it never trained on. At 1.0× it picks no
+          better than chance.
         </p>
       </div>
+    </Panel>
+  )
+}
+
+// ── Lab yield ───────────────────────────────────────────────────────────────────────────
+
+function YieldPanel({ yields }: { yields: LabYield[] }) {
+  return (
+    <Panel
+      title="Lab Yield"
+      description="Critic passes per 1,000 finished simulations over the last 14 days, by lab and by what its tasks maximised. New Template and Search Lab tasks maximise the Critic Score."
+    >
+      {yields.length === 0 ? (
+        <p className="text-body-compact text-pretty text-ink-subtle">
+          No lab simulations judged in the last 14 days.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-body-compact">
+            <thead>
+              <tr className="text-left text-caption text-ink-subtle">
+                <th className="py-1.5 pr-3 font-medium">Lab</th>
+                <th className="py-1.5 pr-3 font-medium">Maximised</th>
+                <th className="py-1.5 pr-3 text-right font-medium">Tasks</th>
+                <th className="py-1.5 pr-3 text-right font-medium">Simulations</th>
+                <th className="py-1.5 pr-3 text-right font-medium">Passed</th>
+                <th className="py-1.5 pr-3 text-right font-medium">Near Misses</th>
+                <th className="py-1.5 text-right font-medium">Per 1,000</th>
+              </tr>
+            </thead>
+            <tbody>
+              {yields.map((y) => (
+                <tr key={`${y.lab}:${y.objective}`} className="border-t border-hairline">
+                  <td className="py-1.5 pr-3 text-ink">{y.lab}</td>
+                  <td className="py-1.5 pr-3 text-ink-muted">{y.objective}</td>
+                  <td className="py-1.5 pr-3 text-right num">{fmt.int(y.tasks)}</td>
+                  <td className="py-1.5 pr-3 text-right num">{fmt.int(y.simulations)}</td>
+                  <td className="py-1.5 pr-3 text-right num">{fmt.int(y.passed)}</td>
+                  <td className="py-1.5 pr-3 text-right num">{fmt.int(y.nearMisses)}</td>
+                  <td
+                    className={cn(
+                      'py-1.5 text-right num',
+                      TEXT_TONE[y.passed > 0 ? 'profit' : 'muted'],
+                    )}
+                  >
+                    {fmt.ratio(y.perThousand, 1)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </Panel>
   )
 }

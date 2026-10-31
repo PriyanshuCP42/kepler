@@ -779,6 +779,4 @@ async def add_task(body: TemplateTask, state: State) -> AddedTask:
         batch_size=per_round,
         template_source=body.template.strip(),
         template_name=body.template_name.strip() or "Template",
-        # No test period leaves no train years to score, so the whole period is scored.
-        objective="sharpe" if body.test_period == "P0Y0M0D" else None,
     )

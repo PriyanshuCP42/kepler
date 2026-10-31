@@ -22,6 +22,8 @@ export interface PreScreen {
   auc: number | null
   /** Pass rate of the model's top 10% over the average pass rate, on held-out recent alphas. */
   lift: number | null
+  /** What it predicts: a Critic pass, or BRAIN's checks when Critic passes are too thin. */
+  target: 'critic' | 'brain'
   oversample: number
   exploreShare: number
   screenedToday: number
@@ -46,9 +48,22 @@ export interface ShortlistEntry {
   reasons: string[]
 }
 
+export interface LabYield {
+  lab: string
+  /** What its tasks maximised, e.g. Critic Score or Train Sharpe. */
+  objective: string
+  tasks: number
+  /** Finished simulations the Critic judged, over the last 14 days. */
+  simulations: number
+  passed: number
+  nearMisses: number
+  perThousand: number
+}
+
 export interface Autopilot {
   funnel: Stage[]
   prescreen: PreScreen
+  yields: LabYield[]
   shortlist: ShortlistEntry[]
 }
 

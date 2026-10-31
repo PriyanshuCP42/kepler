@@ -19,6 +19,7 @@ from .agents.bus import AgentBus
 from .agents.conductor import Conductor
 from .agents.critic import Critic
 from .agents.families import FamilyClerk
+from .agents.overlap import Overlap
 from .agents.repair import RepairEngineer
 from .agents.screener import Screener
 from .agents.strategist import Strategist
@@ -151,6 +152,7 @@ class AppState:
         )
         self.optimizer.llm = self.llm
         self.optimizer.screener = self.screener
+        self.optimizer.overlap = Overlap(self.db, self.alphas)
 
         # Imported here: the API layer builds on this module.
         from .api.lab_tasks import requeue

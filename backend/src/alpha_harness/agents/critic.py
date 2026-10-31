@@ -201,6 +201,73 @@ def judge(row: dict[str, Any]) -> Judgement:
     return Judgement("near_miss" if near else "fail", score, gates, reasons)
 
 
+#: Failing checks that say nothing about returns, so the search may be steered by them
+#: without reading the test years. A failed one costs this share of the search score.
+STRUCTURAL_CHECKS = frozenset({"HIGH_TURNOVER", "LOW_TURNOVER", "CONCENTRATED_WEIGHT"})
+STRUCTURAL_PENALTY = 0.3
+#: What an expression over :data:`MAX_OPERATORS` keeps: Power Pool refuses it outright.
+OVERSIZE_KEEPS = 0.5
+
+
+def search_score(row: dict[str, Any], overlap: float = 0.0) -> float | None:
+    """What a lab maximises: the Critic's score from the train years alone, 0 to 100.
+
+    The Critic's own score reads the test years, which is what makes its decay gate a real
+    out-of-sample check. A search steered by it would fit those years too and leave the gate
+    measuring nothing, so this drops the decay part, scores Sharpe and Fitness on the train
+    years, and keeps only the checks that are not about returns. Without a test period there
+    are no held-out years to protect, and the whole period is scored.
+
+    ``overlap`` is the share of data fields shared with an alpha you already hold
+    (:mod:`.overlap`); a repeat of the pool scores less, before its correlation is known.
+
+    ``None`` when the row has no Sharpe yet.
+    """
+    sharpe = _num(row.get("train_sharpe"))
+    if sharpe is None:
+        sharpe = _num(row.get("sharpe"))
+    if sharpe is None:
+        return None
+    fitness = _num(row.get("train_fitness"))
+    if fitness is None:
+        fitness = _num(row.get("fitness")) or 0.0
+
+    robust = sharpe
+    margin = _num(row.get("margin"))
+    if margin is not None:
+        margin_bps = margin * 1e4
+        after_cost = sharpe * (1 - COST_BPS / margin_bps) if margin_bps > 0 else -abs(sharpe)
+        robust = min(robust, after_cost)
+
+    operators = row.get("operator_count")
+    ops = int(operators) if isinstance(operators, int | float) else None
+    parts = {
+        "robust": _clip(robust / 2.5),
+        "fitness": _clip(fitness / 2.0),
+        "simplicity": _clip(1 - ((ops or 5) - 2) / 10),
+    }
+    weight = sum(WEIGHTS[k] for k in parts)
+    score = 100 * sum(WEIGHTS[k] * v for k, v in parts.items()) / weight
+
+    checks = row.get("checks")
+    listed = checks if isinstance(checks, list) else checks_of(checks)
+    for check in listed:
+        name = str(check.get("name", "")).upper()
+        if name in STRUCTURAL_CHECKS and str(check.get("result", "")).upper() in REFUSING:
+            score *= 1 - STRUCTURAL_PENALTY
+    if ops is not None and ops > MAX_OPERATORS:
+        score *= OVERSIZE_KEEPS
+    return round(score * overlap_factor(overlap), 2)
+
+
+def overlap_factor(overlap: float) -> float:
+    """What a score keeps at this overlap: all of it at none, half at the same field set.
+
+    Squared, so sharing one field of several costs little and repeating the set costs most.
+    """
+    return 1.0 - 0.5 * _clip(overlap) ** 2
+
+
 def _narrow(check: dict[str, Any]) -> bool:
     """Whether a failing check missed its limit by no more than :data:`NEAR` of it."""
     value, limit = _num(check.get("value")), _num(check.get("limit"))

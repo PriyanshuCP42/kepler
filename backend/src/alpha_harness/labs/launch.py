@@ -21,6 +21,7 @@ from ..catalog.queries import FieldFilter
 from ..db.models import Study, StudyStatus
 from ..schemas import Out
 from . import scheduler, search
+from .objectives import CRITIC
 from .params import (
     CORRELATION_BREAKER,
     FIELDS_SAMPLER,
@@ -50,8 +51,8 @@ NO_NEUTRALIZATION = "Choose at least one Neutralization."
 SAMPLE_SIZE = 5
 #: What each lab's task names start with, and the objective its trials are scored on.
 _TASKS: dict[str, tuple[str, str]] = {
-    SEARCH_SAMPLER: ("search", "train_sharpe"),
-    TEMPLATE_SAMPLER: ("template", "train_sharpe"),
+    SEARCH_SAMPLER: ("search", CRITIC),
+    TEMPLATE_SAMPLER: ("template", CRITIC),
     GA_SAMPLER: ("evolution", "train_fitness"),
     POWER_POOL_SAMPLER: ("power-pool", "sharpe"),
     SETTINGS_SAMPLER: ("settings-sampler", "sharpe"),
@@ -60,6 +61,14 @@ _TASKS: dict[str, tuple[str, str]] = {
     SUPER_LAB: ("super-alpha", "sharpe"),
     REPAIR_SAMPLER: ("repair", "sharpe"),
 }
+
+
+def lab_of(task: str) -> str | None:
+    """The lab that named a task, as the UI names it; ``None`` for manual work."""
+    prefix = task.rsplit("-", 1)[0]
+    return next(
+        (TASK_SAMPLERS[sampler] for sampler, (own, _) in _TASKS.items() if own == prefix), None
+    )
 
 
 # --- wire shapes every lab's responses share ------------------------------------------

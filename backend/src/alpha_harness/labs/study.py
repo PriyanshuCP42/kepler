@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 import structlog
 from sqlalchemy import func, select, update
 
+from ..agents.critic import search_score
 from ..brain.platform import IGNORED_CHECKS, QUOTA_CHECKS
 from ..brain.schemas import FULL_MODE, QUICK_MODE
 from ..db.models import (
@@ -49,6 +50,7 @@ if TYPE_CHECKING:  # pragma: no cover
     import optuna
 
     from ..account import PlatformMetadata
+    from ..agents.overlap import Overlap
     from ..agents.screener import Screener
     from ..brain.endpoints import BrainEndpoints
     from ..db.sqlite import Database
@@ -65,7 +67,7 @@ POLL_SECONDS = 5.0
 #: Statistics the local Alpha store keeps, so objectives on them need no second BRAIN read.
 VAULT_STATS = frozenset(
     {"sharpe", "fitness", "turnover", "returns", "drawdown", "margin"}
-    | {"train_sharpe", "train_fitness"}
+    | {"train_sharpe", "train_fitness", obj.CRITIC}
 )
 #: How long a finished Alpha may take to reach the local store before BRAIN is asked.
 VAULT_WAIT = timedelta(minutes=5)
@@ -98,6 +100,8 @@ class Optimizer:
         self.backfill = backfill
         #: The Pre-screen agent, set by the app; ``None`` sends what the labs draw unfiltered.
         self.screener: Screener | None = None
+        #: Set by the app: what the Critic Score charges for repeating your pool.
+        self.overlap: Overlap | None = None
         self.studies: dict[int, optuna.Study] = {}
         #: Live Optuna trial objects for the round in flight, keyed study -> our trial
         #: number. Lost on restart, which :func:`_tell_many` handles by replaying.
@@ -259,6 +263,8 @@ class Optimizer:
             saved = await self.alphas.with_families(
                 await self.alphas.by_ids([a for a in wanted if a])
             )
+        if self.overlap is not None and any(o.key == obj.CRITIC for o in objective_list):
+            await self.overlap.refresh()
         #: (live optuna trial | None, stored row, values | None, summary)
         finished: list[tuple[Any, Trial, list[float] | None, dict[str, Any]]] = []
         started: list[int] = []
@@ -307,10 +313,12 @@ class Optimizer:
             stored_alpha = saved.get(alpha_id)
             # Every objective, not just Sharpe: a row stored without its train block has
             # Sharpe but no Train Fitness, and scoring it would fail the trial for good.
-            if stored_alpha is not None and all(
-                stored_alpha.get(o.key) is not None for o in objective_list
-            ):
-                values = [float(stored_alpha[o.key]) for o in objective_list]
+            values = (
+                None
+                if stored_alpha is None
+                else row_values(stored_alpha, objective_list, self.overlap)
+            )
+            if stored_alpha is not None and values is not None:
                 summary = vault_summary(stored_alpha)
                 finished.append((live.get(trial.number), trial, values, summary))
                 continue
@@ -344,8 +352,10 @@ class Optimizer:
                 continue
 
             extra = obj.train_extra(alpha, objective_list)
-            values = obj.extract(alpha.in_sample, objective_list, extra)
             summary = obj.summarise(alpha)
+            if any(o.key == obj.CRITIC for o in objective_list):
+                extra[obj.CRITIC] = critic_score(obj.alpha_row(alpha, summary), self.overlap)
+            values = obj.extract(alpha.in_sample, objective_list, extra)
             finished.append((live.get(trial.number), trial, values, summary))
 
         if started:
@@ -536,6 +546,29 @@ class Optimizer:
 
 
 # --- optuna plumbing, all synchronous ------------------------------------
+
+
+def critic_score(row: dict[str, Any], overlap: Overlap | None) -> float | None:
+    """The Critic Score of a vault row, charged for what it shares with your pool."""
+    shared = overlap.worst(row.get("expression"), row.get("region")) if overlap else 0.0
+    return search_score(row, shared)
+
+
+def row_values(
+    row: dict[str, Any], objectives: list[obj.Objective], overlap: Overlap | None
+) -> list[float] | None:
+    """Every objective's value from a stored row, or ``None`` while any is missing.
+
+    Every objective, not just Sharpe: a row stored without its train block has Sharpe but no
+    Train Fitness, and scoring it would fail the trial for good.
+    """
+    values: list[float] = []
+    for objective in objectives:
+        raw = critic_score(row, overlap) if objective.key == obj.CRITIC else row.get(objective.key)
+        if raw is None:
+            return None
+        values.append(float(raw))
+    return values
 
 
 def _tell_many(

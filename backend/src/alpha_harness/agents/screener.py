@@ -6,6 +6,9 @@ older than :data:`RETRAIN_HOURS`, and hands the scheduler a :class:`Gate` only w
 model's measured lift is trusted. Without a gate, Template and Search Labs send exactly what
 they always did.
 
+It learns to predict a Critic pass, which is rarer and stricter than passing BRAIN's checks,
+and falls back to BRAIN's checks when the Critic's target is too thin to filter on.
+
 The gate draws :data:`OVERSAMPLE` candidates for every one it sends, sends the best by score,
 and keeps :data:`EXPLORE` of each round for candidates chosen at random from the rest, so the
 model keeps seeing outcomes it did not choose and cannot only confirm itself.
@@ -26,6 +29,7 @@ import structlog
 from ..brain.filters import platform_midnight
 from ..labs import prescreen
 from ..vault.yields import checks_of, verdict
+from . import critic
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -43,6 +47,9 @@ RETRAIN_HOURS = 24.0
 CHECK_SECONDS = 1800.0
 
 Status = Literal["untrained", "training", "ready", "failed"]
+Target = Literal["critic", "brain"]
+#: How :meth:`Screener.reason` names each target.
+TARGETS: dict[Target, str] = {"critic": "the Critic", "brain": "BRAIN's checks"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +79,9 @@ class Screener:
         self.bus = bus
         self.status: Status = "untrained"
         self.report: prescreen.Report | None = None
+        #: What it learnt to predict: a Critic pass, or BRAIN's checks when Critic passes are
+        #: too few or too unpredictable to filter on.
+        self.target: Target = "critic"
         self.trained_at: datetime | None = None
         self.error: str | None = None
         self._fields: dict[str, tuple[str | None, str | None]] = {}
@@ -121,13 +131,17 @@ class Screener:
         try:
             fields = await self._field_map()
             rows = await self._labelled(fields)
-            report = await asyncio.to_thread(prescreen.train, rows)
+            target: Target = "critic"
+            report = await asyncio.to_thread(prescreen.train, [(n, c) for n, c, _ in rows])
+            if not report.trusted:
+                target = "brain"
+                report = await asyncio.to_thread(prescreen.train, [(n, b) for n, _, b in rows])
         except Exception as exc:
             log.warning("prescreen.train_failed", exc_info=True)
             self.status, self.error = "failed", str(exc)[:300]
             self.bus.block("prescreen", f"Training failed: {self.error}")
             return
-        self._fields, self.report = fields, report
+        self._fields, self.report, self.target = fields, report, target
         self.trained_at, self.status, self.error = datetime.now(UTC), "ready", None
         with contextlib.suppress(Exception):
             await asyncio.to_thread(self._save)
@@ -135,6 +149,7 @@ class Screener:
             "prescreen.trained",
             samples=report.samples,
             positives=report.positives,
+            target=target,
             auc=report.auc,
             lift=report.lift,
             seconds=round(time.monotonic() - started, 1),
@@ -192,7 +207,8 @@ class Screener:
         if report.trusted:
             return (
                 f"Filtering Template and Search Lab sends: its top tenth passed "
-                f"{report.lift:.1f}x as often as average on Alphas it never saw."
+                f"{TARGETS[self.target]} {report.lift:.1f}x as often as average on Alphas it "
+                "never saw."
             )
         return (
             f"Watching, not filtering: its lift of {report.lift:.2f}x on held-out Alphas is "
@@ -210,6 +226,7 @@ class Screener:
             "positives": report.positives if report else 0,
             "auc": report.auc if report else None,
             "lift": report.lift if report else None,
+            "target": self.target,
             "oversample": OVERSAMPLE,
             "exploreShare": EXPLORE,
             "screenedToday": self.drawn_today,
@@ -235,15 +252,20 @@ class Screener:
 
     async def _labelled(
         self, fields: dict[str, tuple[str | None, str | None]]
-    ) -> list[tuple[list[str], bool]]:
+    ) -> list[tuple[list[str], bool, bool]]:
+        """Each judged Alpha's features, whether the Critic passes it, and whether BRAIN's
+        checks do, oldest first.
+
+        The Critic's verdict is worked out here from the row rather than read back, so it is
+        before the pool check: that depends on what was submitted since, not on the idea.
+        """
         rows = await self.catalog.query(
-            "SELECT expression, region, delay, universe, neutralization, decay, truncation, "
-            "checks, simulation_mode FROM alpha WHERE expression IS NOT NULL "
-            "ORDER BY date_created"
+            f"SELECT expression, neutralization, decay, truncation, {critic.COLUMNS} "  # noqa: S608
+            "FROM alpha WHERE expression IS NOT NULL ORDER BY date_created"
         )
 
-        def build() -> list[tuple[list[str], bool]]:
-            out: list[tuple[list[str], bool]] = []
+        def build() -> list[tuple[list[str], bool, bool]]:
+            out: list[tuple[list[str], bool, bool]] = []
             for row in rows:
                 judged = verdict(checks_of(row["checks"]), row["simulation_mode"])
                 if judged is None:
@@ -251,7 +273,8 @@ class Screener:
                 settings = {k: row[k] for k in ("region", "delay", "universe", "neutralization")}
                 settings |= {"decay": row["decay"], "truncation": row["truncation"]}
                 names = prescreen.features(row["expression"], settings, fields)
-                out.append((names, judged in ("submittable", "pending")))
+                passed = critic.judge(row).verdict == "pass"
+                out.append((names, passed, judged in ("submittable", "pending")))
             return out
 
         return await asyncio.to_thread(build)
@@ -269,6 +292,7 @@ class Screener:
             "auc": report.auc,
             "lift": report.lift,
             "trainedAt": self.trained_at.isoformat(),
+            "target": self.target,
             "fields": self._fields,
         }
         (self.folder / "model.json").write_text(json.dumps(meta))
@@ -284,4 +308,5 @@ class Screener:
         )
         self._fields = {k: (v[0], v[1]) for k, v in meta["fields"].items()}
         self.trained_at = datetime.fromisoformat(meta["trainedAt"])
+        self.target = "critic" if meta.get("target") == "critic" else "brain"
         self.status = "ready"
