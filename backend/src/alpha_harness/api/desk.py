@@ -16,11 +16,15 @@ Then a verdict: ready, check first, or blocked. Submitting stays a click on BRAI
 """
 
 import asyncio
+from dataclasses import asdict
+from datetime import date
 from typing import Any, Literal
 
 from fastapi import APIRouter
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 
+from ..agents import guard
 from ..brain.platform import (
     POWER_POOL_CLASS,
     PROD_CORRELATION_CEILING,
@@ -42,7 +46,7 @@ router = APIRouter(prefix="/api/desk", tags=["desk"])
 CANDIDATES = 40
 WHOLE = "all"
 
-Readiness = Literal["ready", "check", "hurts", "blocked"]
+Readiness = Literal["ready", "check", "hurts", "overfit", "blocked"]
 
 
 class Figures(Out):
@@ -70,6 +74,32 @@ class Pyramid(Out):
     multiplier: float | None
 
 
+class NeighbourOut(Out):
+    kind: str
+    name: str
+    #: queued | done | failed
+    state: str
+    sharpe: float | None
+    test_sharpe: float | None
+    holds: bool | None
+
+
+class GuardView(Out):
+    """The Overfitting Guard on one candidate: see :mod:`..agents.guard`."""
+
+    status: guard.Status
+    held: int
+    measured: int
+    neighbours: list[NeighbourOut]
+    #: Simulations of the same idea in its region, and the test Sharpe chance alone reaches.
+    siblings: int
+    luck_bar: float
+    years: int
+    positive_years: int
+    test_days: int | None
+    test_without_spike: float | None
+
+
 class Candidate(Out):
     alpha_id: str
     region: str | None
@@ -87,6 +117,7 @@ class Candidate(Out):
     #: BRAIN's, against every user's Alphas; ``None`` until asked.
     prod_correlation: float | None
     effects: list[Effect]
+    guard: GuardView
     pyramid: Pyramid | None
     readiness: Readiness
     reasons: list[str]
@@ -105,10 +136,47 @@ def partition_of(region: Any, delay: Any, power: bool) -> str:
     return f"{region} · D{delay} · {'Power Pool' if power else 'Regular'}"
 
 
+def overfitting(view: GuardView, test_sharpe: float | None) -> list[str]:
+    """Why the Overfitting Guard doubts it; empty when it does not."""
+    doubts: list[str] = []
+    if view.status == "fragile":
+        doubts.append(
+            f"Only {view.held} of {view.measured} neighbours kept {guard.HOLD:.0%} of its Sharpe."
+        )
+    if test_sharpe is not None and test_sharpe < view.luck_bar:
+        doubts.append(
+            f"Test Sharpe {test_sharpe:.2f} is under {view.luck_bar:.2f}, what the best of "
+            f"{view.siblings} variants of this idea reaches by chance."
+        )
+    if view.test_days is not None and view.test_days < guard.MIN_TEST_DAYS:
+        doubts.append(
+            f"Trades on only {view.test_days} days of the test years; "
+            f"at least {guard.MIN_TEST_DAYS} are needed to trust its Sharpe."
+        )
+    if view.years and view.positive_years < guard.POSITIVE_YEARS * view.years:
+        doubts.append(
+            f"Made money in only {view.positive_years} of the {view.years} years it traded in."
+        )
+    if view.test_without_spike is not None and view.test_without_spike <= 0:
+        doubts.append(f"The test years lose money without their best {guard.SPIKE_DAYS} days.")
+    return doubts
+
+
+_GUARD_PENDING = {
+    "untested": "Neighbour check not run yet.",
+    "running": "Neighbour check still running.",
+    "inconclusive": "Too few neighbours came back to judge; run it again later.",
+}
+
+
 def judge(
-    prod: float | None, pool: float | None, effects: list[Effect]
+    prod: float | None,
+    pool: float | None,
+    effects: list[Effect],
+    view: GuardView | None = None,
+    test_sharpe: float | None = None,
 ) -> tuple[Readiness, list[str]]:
-    """Ready, check first, hurts the pool, or blocked, with why."""
+    """Ready, check first, lowers the pool, overfit, or blocked, with why."""
     if prod is not None and prod >= PROD_CORRELATION_CEILING:
         return "blocked", [
             f"Production Correlation {prod:.2f} is over BRAIN's {PROD_CORRELATION_CEILING}."
@@ -127,11 +195,18 @@ def judge(
         where = "your pool" if effect.scope == WHOLE else effect.scope
         reasons.append(f"Combined Sharpe of {where} {before.sharpe:.2f} → {after.sharpe:.2f}.")
         hurts = hurts or change < 0
+    doubts = overfitting(view, test_sharpe) if view is not None else []
+    if doubts:
+        return "overfit", [*doubts, *reasons]
     if hurts:
         return "hurts", reasons
-    if prod is None:
-        return "check", ["Production Correlation not checked yet.", *reasons]
-    return "ready", [f"Production Correlation {prod:.2f}.", *reasons]
+    pending = [] if prod is not None else ["Production Correlation not checked yet."]
+    if view is not None and view.status in _GUARD_PENDING:
+        pending.append(_GUARD_PENDING[view.status])
+    if pending:
+        return "check", [*pending, *reasons]
+    held = [] if view is None else [f"{view.held} of {view.measured} neighbours held."]
+    return "ready", [f"Production Correlation {prod:.2f}.", *held, *reasons]
 
 
 def _figures(raw: dict[str, Any] | None) -> Figures | None:
@@ -209,6 +284,10 @@ async def desk(state: State) -> Desk:
     meta = await state.alphas.by_ids(scopes[WHOLE]) | stored
     effects = await asyncio.to_thread(portfolio.what_if, series, meta, scopes, joins)
 
+    rows = {v.alpha_id: stored[v.alpha_id] for v in chosen}
+    verdicts_of = await state.guard.verdicts(rows)
+    siblings = await state.guard.siblings(rows)
+
     checks = {v.alpha_id: checks_of(stored[v.alpha_id].get("checks")) for v in chosen}
     prod = await prod_correlations(state, list(checks), checks)
     categories, niches = await _pyramids(state)
@@ -237,7 +316,12 @@ async def desk(state: State) -> Desk:
                 completes=submitted + 1 == PYRAMID_MIN_ALPHAS,
                 multiplier=niche.multiplier if niche else None,
             )
-        readiness, reasons = judge(prod.get(v.alpha_id), v.pool_correlation, found)
+        view = _guard_view(
+            verdicts_of[v.alpha_id], siblings.get(v.alpha_id, 1), series.get(v.alpha_id), row
+        )
+        readiness, reasons = judge(
+            prod.get(v.alpha_id), v.pool_correlation, found, view, row.get("test_sharpe")
+        )
         out.append(
             Candidate(
                 alpha_id=v.alpha_id,
@@ -254,6 +338,7 @@ async def desk(state: State) -> Desk:
                 pool_correlation=v.pool_correlation,
                 prod_correlation=prod.get(v.alpha_id),
                 effects=found,
+                guard=view,
                 pyramid=pyramid,
                 readiness=readiness,
                 reasons=reasons,
@@ -269,7 +354,32 @@ async def desk(state: State) -> Desk:
     )
 
 
-_ORDER: dict[Readiness, int] = {"ready": 3, "check": 2, "hurts": 1, "blocked": 0}
+def _guard_view(
+    found: guard.Verdict,
+    siblings: int,
+    days: dict[date, tuple[float, float]] | None,
+    row: dict[str, Any],
+) -> GuardView:
+    test_start = row.get("test_start")
+    steady = guard.consistency(
+        {d: p for d, (p, _) in (days or {}).items()},
+        test_start if isinstance(test_start, date) else None,
+    )
+    return GuardView(
+        status=found.status,
+        held=found.held,
+        measured=found.measured,
+        neighbours=[NeighbourOut.model_validate(asdict(n)) for n in found.neighbours],
+        siblings=siblings,
+        luck_bar=round(guard.luck_bar(siblings), 2),
+        years=steady.years,
+        positive_years=steady.positive_years,
+        test_days=steady.test_days,
+        test_without_spike=steady.test_without_spike,
+    )
+
+
+_ORDER: dict[Readiness, int] = {"ready": 4, "check": 3, "hurts": 2, "overfit": 1, "blocked": 0}
 
 
 def _rank(candidate: Candidate) -> tuple[int, float]:
@@ -296,3 +406,31 @@ async def check_candidates(state: State) -> WorkflowStarted:
     if not wanted:
         raise refuse(409, "nothing_to_check", "Every candidate has its Production Correlation.")
     return await check_prod_correlation(AlphaIds.model_validate({"alphaIds": wanted}), state)
+
+
+class GuardRequest(BaseModel):
+    #: Candidates checked, best first among those not ruled out already.
+    limit: int = Field(default=20, ge=1, le=40)
+    cores: int = Field(default=4, ge=1, le=8)
+
+
+class GuardTask(Out):
+    id: int
+    name: str
+    finalists: int
+
+
+@router.post("/guard", status_code=201)
+async def guard_task(body: GuardRequest, state: State) -> GuardTask:
+    """Write the neighbours of the best candidates not yet checked as one task in Tasks, not
+    started. Skips the blocked, the overfit and those that lower your pool."""
+    found = await desk(state)
+    wanted = [
+        c.alpha_id
+        for c in found.candidates
+        if c.readiness in ("ready", "check") and c.guard.status == "untested"
+    ][: body.limit]
+    added = await state.guard.add_task(wanted, body.cores) if wanted else None
+    if added is None:
+        raise refuse(409, "nothing_to_check", "Every candidate worth checking has its neighbours.")
+    return GuardTask(id=added.id, name=added.name, finalists=len(wanted))

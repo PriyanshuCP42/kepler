@@ -582,6 +582,25 @@ class RepairStat(Base):
     wins: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class GuardCheck(Base):
+    """One neighbour the Overfitting Guard ran for a finalist: the same idea, changed a little.
+
+    Linked to the trial that runs it by task and number, as a repair is. Its result is read
+    from the trial's Alpha whenever the desk asks, so nothing here is settled.
+    """
+
+    __tablename__ = "guard_check"
+    __table_args__ = (Index("ix_guard_check_trial", "study_id", "trial_number"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    origin_alpha_id: Mapped[str] = mapped_column(String(64), index=True)
+    #: Which change, e.g. ``windows_down``, ``decay_up``.
+    kind: Mapped[str] = mapped_column(String(32))
+    study_id: Mapped[int] = mapped_column(ForeignKey("study.id", ondelete="CASCADE"), index=True)
+    trial_number: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
+
+
 class TrialDistribution(Base):
     """One Optuna distribution, stored once and referenced by every trial that drew from it.
 

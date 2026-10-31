@@ -19,6 +19,7 @@ from .agents.bus import AgentBus
 from .agents.conductor import Conductor
 from .agents.critic import Critic
 from .agents.families import FamilyClerk
+from .agents.guard import Guard
 from .agents.overlap import Overlap
 from .agents.repair import RepairEngineer
 from .agents.screener import Screener
@@ -160,6 +161,7 @@ class AppState:
         self.conductor = Conductor(self, self.agents, requeue)
         self.repair = RepairEngineer(self, self.agents)
         self.strategist = Strategist(self, self.agents)
+        self.guard = Guard(self, self.agents)
 
         self._renew_lock = asyncio.Lock()
         self._last_session_check = float("-inf")

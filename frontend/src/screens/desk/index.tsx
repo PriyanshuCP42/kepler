@@ -5,8 +5,14 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link } from '@tanstack/react-router'
-import { ChevronDownIcon, ChevronRightIcon, RefreshCwIcon, ShieldCheckIcon } from 'lucide-react'
+import { Link, useNavigate } from '@tanstack/react-router'
+import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  MicroscopeIcon,
+  RefreshCwIcon,
+  ShieldCheckIcon,
+} from 'lucide-react'
 import { Fragment, useState } from 'react'
 import { toast } from 'sonner'
 import { errorMessage } from '@/api/http'
@@ -18,6 +24,7 @@ import {
   desk,
   type Effect,
   type Figures,
+  type GuardView,
   type Readiness,
 } from '@/screens/desk/api'
 import {
@@ -47,12 +54,17 @@ const READINESS: Record<Readiness, { label: string; tone: Tone; note: string }> 
   check: {
     label: 'Check First',
     tone: 'warn',
-    note: 'Lifts your combined Sharpe; Production Correlation not checked yet.',
+    note: 'Lifts your combined Sharpe; Production Correlation or the neighbour check still to do.',
   },
   hurts: {
     label: 'Lowers Pool',
     tone: 'muted',
     note: 'Would lower the combined Sharpe of your pool or its partition.',
+  },
+  overfit: {
+    label: 'Overfit',
+    tone: 'loss',
+    note: 'Neighbours fall away, too few trading days, or a test Sharpe luck explains.',
   },
   blocked: {
     label: 'Blocked',
@@ -72,7 +84,23 @@ export function DeskScreen() {
       }),
     onError: (error) => toast.error(errorMessage(error)),
   })
+  const navigate = useNavigate()
+  const guard = useMutation({
+    mutationFn: () => desk.guard(),
+    onSuccess: (task) => {
+      toast.success(`Neighbour check written for ${task.finalists} candidates`, {
+        description: 'Run it from Tasks. Each candidate is re-simulated with small changes.',
+        action: { label: 'Open Tasks', onClick: () => void navigate({ to: '/tasks' }) },
+      })
+      void queryClient.invalidateQueries({ queryKey: DESK_KEY })
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  })
   const data = query.data
+  const unguarded =
+    data?.candidates.filter(
+      (c) => c.guard.status === 'untested' && (c.readiness === 'ready' || c.readiness === 'check'),
+    ).length ?? 0
   const missing = data?.candidates.filter((c) => c.prodCorrelation === null).length ?? 0
 
   return (
@@ -90,6 +118,15 @@ export function DeskScreen() {
             >
               <ShieldCheckIcon />
               Check Production Correlation{missing ? ` (${missing})` : ''}
+            </Button>
+            <Button
+              loading={guard.isPending}
+              disabled={!unguarded}
+              onClick={() => guard.mutate()}
+              title="Re-simulates each candidate with small changes: a real signal survives them"
+            >
+              <MicroscopeIcon />
+              Run Neighbour Check{unguarded ? ` (${Math.min(unguarded, 20)})` : ''}
             </Button>
             <Button
               loading={query.isFetching}
@@ -126,7 +163,7 @@ export function DeskScreen() {
 function Summary({ candidates, submitted }: { candidates: Candidate[]; submitted: number }) {
   const count = (r: Readiness) => candidates.filter((c) => c.readiness === r).length
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
       {(Object.keys(READINESS) as Readiness[]).map((r) => (
         <Metric
           key={r}
@@ -202,6 +239,7 @@ function CandidatesPanel({ candidates }: { candidates: Candidate[] }) {
                 <th className="px-4 py-2 text-right font-medium">Test Sharpe</th>
                 <th className="px-4 py-2 text-right font-medium">Pool Corr</th>
                 <th className="px-4 py-2 text-right font-medium">Prod Corr</th>
+                <th className="px-4 py-2 font-medium">Neighbours</th>
                 <th className="px-4 py-2 font-medium">Your Pool Sharpe</th>
                 <th className="px-4 py-2 font-medium">Partition Sharpe</th>
                 <th className="px-4 py-2 font-medium">Pyramid</th>
@@ -265,6 +303,9 @@ function CandidatesPanel({ candidates }: { candidates: Candidate[] }) {
                         {isNum(c.prodCorrelation) ? fmt.ratio(c.prodCorrelation) : 'not checked'}
                       </td>
                       <td className="px-4 py-2">
+                        <GuardBadge guard={c.guard} />
+                      </td>
+                      <td className="px-4 py-2">
                         <Change effect={effectOf(c, true)} />
                       </td>
                       <td className="px-4 py-2">
@@ -293,7 +334,7 @@ function CandidatesPanel({ candidates }: { candidates: Candidate[] }) {
                     </tr>
                     {expanded && (
                       <tr className="border-b border-hairline-subtle bg-surface-1">
-                        <td colSpan={9} className="px-4 py-3">
+                        <td colSpan={10} className="px-4 py-3">
                           <Details candidate={c} />
                         </td>
                       </tr>
@@ -306,6 +347,92 @@ function CandidatesPanel({ candidates }: { candidates: Candidate[] }) {
         </div>
       )}
     </Panel>
+  )
+}
+
+const GUARD: Record<GuardView['status'], { label: string; tone: Tone }> = {
+  untested: { label: 'Not run', tone: 'muted' },
+  running: { label: 'Running', tone: 'warn' },
+  robust: { label: 'Robust', tone: 'profit' },
+  fragile: { label: 'Fragile', tone: 'loss' },
+  inconclusive: { label: 'Inconclusive', tone: 'muted' },
+}
+
+function GuardBadge({ guard }: { guard: GuardView }) {
+  const shown = GUARD[guard.status]
+  const count = guard.neighbours.length
+  return (
+    <span className="whitespace-nowrap">
+      <span className={cn('text-body-compact', TEXT_TONE[shown.tone])}>{shown.label}</span>
+      {count > 0 && (
+        <span className="num ml-1.5 text-caption text-ink-subtle">
+          {guard.held}/{guard.measured || count}
+        </span>
+      )}
+    </span>
+  )
+}
+
+function GuardDetails({ guard, testSharpe }: { guard: GuardView; testSharpe: number | null }) {
+  const luck = isNum(testSharpe) && testSharpe < guard.luckBar
+  return (
+    <div className="flex flex-col gap-2">
+      <ul className="flex flex-col gap-0.5 text-body-compact text-ink-muted">
+        <li className={luck ? TEXT_TONE.loss : undefined}>
+          {fmt.int(guard.siblings)} simulations of this idea in its region: chance alone takes the
+          best of them to a test Sharpe of {fmt.ratio(guard.luckBar)}; this one has{' '}
+          {fmt.ratio(testSharpe)}.
+        </li>
+        {guard.testDays !== null && (
+          <li className={guard.testDays < 100 ? TEXT_TONE.loss : undefined}>
+            Trades on {fmt.int(guard.testDays)} days of the test years.
+          </li>
+        )}
+        {guard.years > 0 && (
+          <li>
+            Made money in {guard.positiveYears} of the {guard.years} years it traded in.
+          </li>
+        )}
+        {guard.testWithoutSpike !== null && (
+          <li className={guard.testWithoutSpike <= 0 ? TEXT_TONE.loss : undefined}>
+            Test years without their best 10 days:{' '}
+            {guard.testWithoutSpike > 0 ? 'still make money' : 'lose money'}.
+          </li>
+        )}
+      </ul>
+      {guard.neighbours.length > 0 && (
+        <table className="w-full max-w-xl text-body-compact">
+          <thead>
+            <tr className="text-left text-caption text-ink-subtle">
+              <th className="py-1 pr-3 font-medium">Neighbour</th>
+              <th className="py-1 pr-3 text-right font-medium">Sharpe</th>
+              <th className="py-1 pr-3 text-right font-medium">Test Sharpe</th>
+              <th className="py-1 font-medium">Held</th>
+            </tr>
+          </thead>
+          <tbody>
+            {guard.neighbours.map((n) => (
+              <tr key={n.kind} className="border-t border-hairline">
+                <td className="py-1 pr-3 text-ink-muted">{n.name}</td>
+                <td className="num py-1 pr-3 text-right">{fmt.ratio(n.sharpe)}</td>
+                <td className="num py-1 pr-3 text-right">{fmt.ratio(n.testSharpe)}</td>
+                <td className="py-1">
+                  {n.state === 'queued' ? (
+                    <span className="text-ink-subtle">waiting</span>
+                  ) : n.state === 'failed' ? (
+                    <span className="text-ink-subtle">did not run</span>
+                  ) : n.holds ? (
+                    <span className={TEXT_TONE.profit}>yes</span>
+                  ) : (
+                    <span className={TEXT_TONE.loss}>no</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
   )
 }
 
@@ -331,6 +458,7 @@ function Details({ candidate }: { candidate: Candidate }) {
           {fmt.ratio(candidate.fitness)}, Critic score {fmt.ratio(candidate.criticScore, 1)}.
         </li>
       </ul>
+      <GuardDetails guard={candidate.guard} testSharpe={candidate.testSharpe} />
       {candidate.expression && (
         <code className="block overflow-x-auto rounded bg-surface-2 px-2 py-1.5 text-caption text-ink">
           {candidate.expression}

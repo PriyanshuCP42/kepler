@@ -87,7 +87,7 @@ def _wrap(tail: str) -> Transform:
     return apply
 
 
-def _setting(change: Callable[[Settings, Options], Settings | None]) -> Transform:
+def setting_move(change: Callable[[Settings, Options], Settings | None]) -> Transform:
     def apply(expression: str, settings: Settings, options: Options) -> tuple[str, Settings] | None:
         changed = change(dict(settings), options)
         return None if changed is None or changed == settings else (expression, changed)
@@ -100,7 +100,7 @@ def _size(universe: str) -> int | None:
     return int(digits[0]) if digits and universe.upper().startswith("TOP") else None
 
 
-def _universe(step: int) -> Callable[[Settings, Options], Settings | None]:
+def universe_step(step: int) -> Callable[[Settings, Options], Settings | None]:
     def change(settings: Settings, options: Options) -> Settings | None:
         current = _size(str(settings.get("universe") or ""))
         sized = sorted((s, u) for u in options.universes if (s := _size(u)) is not None)
@@ -116,7 +116,7 @@ def _universe(step: int) -> Callable[[Settings, Options], Settings | None]:
     return change
 
 
-def _neutralization(step: int) -> Callable[[Settings, Options], Settings | None]:
+def neutralization_step(step: int) -> Callable[[Settings, Options], Settings | None]:
     def change(settings: Settings, options: Options) -> Settings | None:
         ladder = [n for n in NEUTRALIZATIONS if n in options.neutralizations]
         current = str(settings.get("neutralization") or "")
@@ -171,7 +171,10 @@ _CROWDED = frozenset({POOL, "SELF_CORRELATION"})
 
 MOVES: tuple[Move, ...] = (
     Move(
-        "slower_decay", "Raise the decay setting", _TURNOVER | {"LOW_FITNESS"}, _setting(_decay(2))
+        "slower_decay",
+        "Raise the decay setting",
+        _TURNOVER | {"LOW_FITNESS"},
+        setting_move(_decay(2)),
     ),
     Move("smooth_mean", "Average over a week", _TURNOVER, _wrap("ts_mean(alpha, 5)")),
     Move(
@@ -184,7 +187,7 @@ MOVES: tuple[Move, ...] = (
         "faster_decay",
         "Lower the decay setting",
         frozenset({"LOW_TURNOVER"}),
-        _setting(_decay(0.5)),
+        setting_move(_decay(0.5)),
     ),
     Move(
         "liquid_tilt",
@@ -205,44 +208,44 @@ MOVES: tuple[Move, ...] = (
         "tighter_truncation",
         "Halve truncation",
         frozenset({"CONCENTRATED_WEIGHT"}),
-        _setting(_truncation),
+        setting_move(_truncation),
     ),
-    Move("wider_universe", "Use the next larger universe", _ROBUST, _setting(_universe(1))),
+    Move("wider_universe", "Use the next larger universe", _ROBUST, setting_move(universe_step(1))),
     Move(
         "narrower_universe",
         "Use the next smaller universe",
         frozenset({"LOW_FITNESS", "LOW_SHARPE"}),
-        _setting(_universe(-1)),
+        setting_move(universe_step(-1)),
     ),
     Move(
         "finer_neutralization",
         "Neutralize within finer groups",
         _WEAK | _CROWDED,
-        _setting(_neutralization(1)),
+        setting_move(neutralization_step(1)),
     ),
     Move(
         "coarser_neutralization",
         "Neutralize within broader groups",
         frozenset({"LOW_SHARPE", "LOW_FITNESS"}),
-        _setting(_neutralization(-1)),
+        setting_move(neutralization_step(-1)),
     ),
     Move(
         "statistical_neutralization",
         "Neutralize statistically",
         _CROWDED,
-        _setting(_neutralize_to("STATISTICAL")),
+        setting_move(_neutralize_to("STATISTICAL")),
     ),
     Move(
         "crowding_neutralization",
         "Neutralize against crowded factors",
         _CROWDED,
-        _setting(_neutralize_to("CROWDING")),
+        setting_move(_neutralize_to("CROWDING")),
     ),
     Move(
         "momentum_neutralization",
         "Neutralize reversion and momentum",
         _CROWDED | {DECAY},
-        _setting(_neutralize_to("REVERSION_AND_MOMENTUM")),
+        setting_move(_neutralize_to("REVERSION_AND_MOMENTUM")),
     ),
     Move("resid_returns", "Keep what returns do not explain", _CROWDED, _breaker("resid_returns")),
     Move("neut_momentum", "Orthogonalize against momentum", _CROWDED, _breaker("neut_momentum")),
@@ -297,6 +300,44 @@ def choose(
             drawn.append((best[0], move, best[1]))
     drawn.sort(key=lambda d: d[0], reverse=True)
     return [(move, failure) for _, move, failure in drawn[:count]]
+
+
+def base_settings(row: dict[str, Any]) -> Settings:
+    """A stored Alpha's settings as a simulation asks for them, in Full mode with a test period."""
+    return {
+        # BRAIN's schema offers universes and neutralizations per instrument type.
+        "instrumentType": INSTRUMENT_TYPE,
+        "region": row["region"],
+        "universe": row["universe"],
+        "delay": int(row["delay"]),
+        "neutralization": row["neutralization"],
+        "decay": int(row["decay"] or 0),
+        "truncation": float(row["truncation"] or 0.08),
+        "testPeriod": TEST_PERIOD,
+        "simulationMode": FULL_MODE,
+    }
+
+
+def options_for(schema: dict[str, Any], base: Settings) -> Options:
+    return Options(
+        tuple(str(u) for u in valid_values(schema, "universe", base)),
+        tuple(str(n) for n in valid_values(schema, "neutralization", base)),
+    )
+
+
+def checked_request(
+    expression: str, settings: Settings, schema: dict[str, Any]
+) -> SimulationRequest | None:
+    """The simulation, or ``None`` when BRAIN's settings schema would refuse it."""
+    try:
+        request = SimulationRequest(
+            settings=SimulationSettings.model_validate(settings), regular=expression
+        )
+    except ValueError:
+        return None
+    if schema and validate_settings(schema, request.to_wire()["settings"]):
+        return None
+    return request
 
 
 @dataclass(frozen=True, slots=True)
@@ -390,39 +431,15 @@ class RepairEngineer:
             failed = failures(row, verdict.gates or {})
             if not failed:
                 continue
-            base = {
-                # BRAIN's schema offers universes and neutralizations per instrument type.
-                "instrumentType": INSTRUMENT_TYPE,
-                "region": row["region"],
-                "universe": row["universe"],
-                "delay": int(row["delay"]),
-                "neutralization": row["neutralization"],
-                "decay": int(row["decay"] or 0),
-                "truncation": float(row["truncation"] or 0.08),
-                "testPeriod": TEST_PERIOD,
-                "simulationMode": FULL_MODE,
-            }
-            options = Options(
-                tuple(str(u) for u in valid_values(schema, "universe", base)),
-                tuple(str(n) for n in valid_values(schema, "neutralization", base)),
-            )
+            base = base_settings(row)
+            options = options_for(schema, base)
             for move, failure in choose(failed, stats, per_alpha * 2):
                 built = move.apply(expression, base, options)
-                if built is None:
-                    continue
-                new_expression, new_settings = built
-                try:
-                    request = SimulationRequest(
-                        settings=SimulationSettings.model_validate(new_settings),
-                        regular=new_expression,
-                    )
-                except ValueError:
-                    continue
-                wire = request.to_wire()
-                if schema and validate_settings(schema, wire["settings"]):
+                request = None if built is None else checked_request(*built, schema)
+                if request is None:
                     continue
                 # Two fixes can write the same simulation; it is sent, and counted, once.
-                key = json.dumps(wire, sort_keys=True)
+                key = json.dumps(request.to_wire(), sort_keys=True)
                 if key in seen:
                     continue
                 seen.add(key)

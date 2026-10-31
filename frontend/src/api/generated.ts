@@ -940,6 +940,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/desk/guard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Guard Task
+         * @description Write the neighbours of the best candidates not yet checked as one task in Tasks, not
+         *     started. Skips the blocked, the overfit and those that lower your pool.
+         */
+        post: operations["guard_task_api_desk_guard_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/desk/prod-correlation": {
         parameters: {
             query?: never;
@@ -3032,6 +3053,7 @@ export interface components {
             expression: string | null;
             /** Fitness */
             fitness: number | null;
+            guard: components["schemas"]["GuardView"];
             /** Poolcorrelation */
             poolCorrelation: number | null;
             /** Powerpool */
@@ -3043,7 +3065,7 @@ export interface components {
              * Readiness
              * @enum {string}
              */
-            readiness: "ready" | "check" | "hurts" | "blocked";
+            readiness: "ready" | "check" | "hurts" | "overfit" | "blocked";
             /** Reasons */
             reasons: string[];
             /** Region */
@@ -3774,6 +3796,57 @@ export interface components {
             /** Turnover */
             turnover: number;
         };
+        /** GuardRequest */
+        GuardRequest: {
+            /**
+             * Cores
+             * @default 4
+             */
+            cores: number;
+            /**
+             * Limit
+             * @default 20
+             */
+            limit: number;
+        };
+        /** GuardTask */
+        GuardTask: {
+            /** Finalists */
+            finalists: number;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+        };
+        /**
+         * GuardView
+         * @description The Overfitting Guard on one candidate: see :mod:`..agents.guard`.
+         */
+        GuardView: {
+            /** Held */
+            held: number;
+            /** Luckbar */
+            luckBar: number;
+            /** Measured */
+            measured: number;
+            /** Neighbours */
+            neighbours: components["schemas"]["NeighbourOut"][];
+            /** Positiveyears */
+            positiveYears: number;
+            /** Siblings */
+            siblings: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "untested" | "running" | "robust" | "fragile" | "inconclusive";
+            /** Testdays */
+            testDays: number | null;
+            /** Testwithoutspike */
+            testWithoutSpike: number | null;
+            /** Years */
+            years: number;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -4166,6 +4239,21 @@ export interface components {
              * Format: date
              */
             month: string;
+        };
+        /** NeighbourOut */
+        NeighbourOut: {
+            /** Holds */
+            holds: boolean | null;
+            /** Kind */
+            kind: string;
+            /** Name */
+            name: string;
+            /** Sharpe */
+            sharpe: number | null;
+            /** State */
+            state: string;
+            /** Testsharpe */
+            testSharpe: number | null;
         };
         /** NetFigures */
         NetFigures: {
@@ -7652,6 +7740,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Desk"];
+                };
+            };
+        };
+    };
+    guard_task_api_desk_guard_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GuardRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuardTask"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

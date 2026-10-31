@@ -39,6 +39,8 @@ FIELDS_SAMPLER = "fields-sampler"
 SUPER_LAB = "super-alpha"
 #: Studies the Repair Engineer writes: near misses re-run with a fix each (agents.repair).
 REPAIR_SAMPLER = "repair"
+#: Studies the Overfitting Guard writes: finalists re-run with small changes (agents.guard).
+GUARD_SAMPLER = "guard"
 #: Studies that are research-lab tasks, run only from the Tasks tab, by their lab's name.
 TASK_SAMPLERS = {
     SEARCH_SAMPLER: "Search Lab",
@@ -50,6 +52,7 @@ TASK_SAMPLERS = {
     FIELDS_SAMPLER: "Fields Sampler",
     SUPER_LAB: "Super Alpha Lab",
     REPAIR_SAMPLER: "Repair Engineer",
+    GUARD_SAMPLER: "Overfitting Guard",
 }
 
 
@@ -187,6 +190,17 @@ class RepairParams(TaskParams):
     moves: list[str] = Field(default_factory=list)
 
 
+class GuardParams(TaskParams):
+    """Overfitting Guard: each finalist's neighbours, every one written up front.
+
+    ``region`` and ``delay`` are the most common among the finalists, shown on the task card.
+    """
+
+    #: Finalists the task checks, and the neighbours it runs, for the task's detail line.
+    alphas: int = 0
+    checks: list[str] = Field(default_factory=list)
+
+
 BY_SAMPLER: dict[str, type[TaskParams]] = {
     SEARCH_SAMPLER: SearchParams,
     TEMPLATE_SAMPLER: TemplateParams,
@@ -197,6 +211,7 @@ BY_SAMPLER: dict[str, type[TaskParams]] = {
     FIELDS_SAMPLER: FieldsSamplerParams,
     SUPER_LAB: SuperParams,
     REPAIR_SAMPLER: RepairParams,
+    GUARD_SAMPLER: GuardParams,
 }
 
 
