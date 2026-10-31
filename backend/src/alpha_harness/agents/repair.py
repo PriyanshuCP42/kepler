@@ -334,15 +334,28 @@ class RepairEngineer:
     # -- planning ------------------------------------------------------------
 
     async def waiting(self) -> list[str]:
-        """Near misses not tried yet, best Critic score first."""
+        """Near misses not tried yet, taken in turn from each market, best first within each.
+
+        Best-first alone filled a whole round from one market, which spreads nothing across
+        the pyramids; taking turns gives every market with near misses its share.
+        """
         async with self.state.db.session() as session:
             tried = select(RepairAttempt.origin_alpha_id)
-            rows = await session.scalars(
-                select(CriticVerdict.alpha_id)
-                .where(CriticVerdict.verdict == "near_miss", CriticVerdict.alpha_id.not_in(tried))
-                .order_by(CriticVerdict.score.desc())
+            rows = (
+                (
+                    await session.execute(
+                        select(CriticVerdict.alpha_id, CriticVerdict.region, CriticVerdict.delay)
+                        .where(
+                            CriticVerdict.verdict == "near_miss",
+                            CriticVerdict.alpha_id.not_in(tried),
+                        )
+                        .order_by(CriticVerdict.score.desc())
+                    )
+                )
+                .tuples()
+                .all()
             )
-            return list(rows.all())
+        return interleave([(alpha_id, (region, delay)) for alpha_id, region, delay in rows])
 
     async def plan(self, limit: int, per_alpha: int = PER_ALPHA) -> list[Repair]:
         """Fixes for the best ``limit`` untried near misses, checked against BRAIN's settings."""
@@ -462,7 +475,7 @@ class RepairEngineer:
 
     async def settle(self) -> int:
         """Judge finished repairs by the Critic's verdict and update what has been learned."""
-        settled = 0
+        settled = await self._correct()
         async with self.state.db.session() as session:
             open_attempts = (
                 await session.scalars(select(RepairAttempt).where(RepairAttempt.outcome.is_(None)))
@@ -476,15 +489,16 @@ class RepairEngineer:
                 )
             }
             alpha_ids = [t.alpha_id for t in trials.values() if t.alpha_id]
-            verdicts = {
-                v.alpha_id: v.verdict
-                for v in await session.scalars(
+            judged = list(
+                await session.scalars(
                     select(CriticVerdict).where(CriticVerdict.alpha_id.in_(alpha_ids))
                 )
-            }
+            )
+            verdicts = {v.alpha_id: v.verdict for v in judged}
+            placed = {v.alpha_id for v in judged if v.family_checked_at is not None}
             for attempt in open_attempts:
                 trial = trials.get((attempt.study_id, attempt.trial_number))
-                outcome = _outcome(trial, verdicts)
+                outcome = _outcome(trial, verdicts, placed)
                 if outcome is None:
                     continue
                 attempt.outcome, attempt.settled_at = outcome, utcnow()
@@ -502,6 +516,27 @@ class RepairEngineer:
                     self.bus.count("repair", "fixed")
                     self.bus.handoff("repair", "critic", "fixed", 1, "repaired and passing")
         return settled
+
+    async def _correct(self) -> int:
+        """Turn back fixes whose Alpha no longer passes, e.g. found to repeat your pool."""
+        async with self.state.db.session() as session:
+            wrong = (
+                (
+                    await session.execute(
+                        select(RepairAttempt)
+                        .join(CriticVerdict, CriticVerdict.alpha_id == RepairAttempt.alpha_id)
+                        .where(RepairAttempt.outcome == "fixed", CriticVerdict.verdict != "pass")
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for attempt in wrong:
+                attempt.outcome = "not_fixed"
+                stat = await session.get(RepairStat, (attempt.failure, attempt.move))
+                if stat is not None and stat.wins > 0:
+                    stat.wins -= 1
+            return len(wrong)
 
     async def summary(self) -> dict[str, Any]:
         async with self.state.db.session() as session:
@@ -537,8 +572,27 @@ class RepairEngineer:
             )
 
 
-def _outcome(trial: Trial | None, verdicts: dict[str, str]) -> str | None:
-    """A finished repair's outcome, or ``None`` while it is still out or not judged."""
+def interleave(rows: list[tuple[str, Any]]) -> list[str]:
+    """Ids taken in turn from each group, keeping each group's own order."""
+    groups: dict[Any, list[str]] = {}
+    for alpha_id, group in rows:
+        groups.setdefault(group, []).append(alpha_id)
+    out: list[str] = []
+    queues = list(groups.values())
+    while queues:
+        out.extend(queue.pop(0) for queue in queues)
+        queues = [queue for queue in queues if queue]
+    return out
+
+
+def _outcome(
+    trial: Trial | None, verdicts: dict[str, str], placed: frozenset[str] | set[str] = frozenset()
+) -> str | None:
+    """A finished repair's outcome, or ``None`` while it is still out or not judged.
+
+    A pass is only a fix once the Family Clerk has compared it with your pool (``placed``):
+    one that repeats the pool passes the Critic first and is turned back afterwards.
+    """
     if trial is None:
         return "cancelled"
     if trial.state in (TrialState.QUEUED, TrialState.RUNNING) or (
@@ -549,7 +603,9 @@ def _outcome(trial: Trial | None, verdicts: dict[str, str]) -> str | None:
         verdict = verdicts.get(trial.alpha_id)
         if verdict is None:
             return None
-        return "fixed" if verdict == "pass" else "not_fixed"
+        if verdict == "pass":
+            return "fixed" if trial.alpha_id in placed else None
+        return "not_fixed"
     if trial.state == TrialState.FAIL:
         return "error"
     return "cancelled" if trial.state == TrialState.PRUNED else None

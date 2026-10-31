@@ -92,7 +92,21 @@ def test_a_repair_is_settled_only_once_the_critic_has_judged_it():
     assert repair._outcome(_trial(TrialState.RUNNING), {}) is None
     assert repair._outcome(_trial(TrialState.PRUNED), {}) is None  # not sent yet
     assert repair._outcome(_trial(TrialState.COMPLETE, "a1"), {}) is None  # not judged yet
-    assert repair._outcome(_trial(TrialState.COMPLETE, "a1"), {"a1": "pass"}) == "fixed"
+    # A pass waits for the Family Clerk's pool check before it counts as fixed.
+    assert repair._outcome(_trial(TrialState.COMPLETE, "a1"), {"a1": "pass"}) is None
+    assert repair._outcome(_trial(TrialState.COMPLETE, "a1"), {"a1": "pass"}, {"a1"}) == "fixed"
     assert repair._outcome(_trial(TrialState.COMPLETE, "a1"), {"a1": "fail"}) == "not_fixed"
     assert repair._outcome(_trial(TrialState.FAIL, finished=1), {}) == "error"
     assert repair._outcome(None, {}) == "cancelled"
+
+
+def test_near_misses_are_taken_in_turn_from_each_market():
+    rows = [
+        ("e1", "EUR"),
+        ("e2", "EUR"),
+        ("e3", "EUR"),
+        ("u1", "USA"),
+        ("g1", "GLB"),
+        ("u2", "USA"),
+    ]
+    assert repair.interleave(rows) == ["e1", "u1", "g1", "e2", "u2", "e3"]
