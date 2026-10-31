@@ -51,6 +51,8 @@ class Estimate:
     combined: float | None
     power_pool: float | None
     alphas: int
+    #: The whole pool's recent figures, which its combined-performance score is made of.
+    figures: dict[str, Any] | None = None
 
 
 @dataclass(slots=True)
@@ -64,6 +66,9 @@ class Step:
     brain_power_pool: float | None
     estimate_combined: float | None
     estimate_power_pool: float | None
+    #: How much the estimate's combined-performance score moved, as a share: Sharpe, Fitness,
+    #: margin, turnover and drawdown together (see :func:`..tools.portfolio.quality_change`).
+    estimate_quality: float | None = None
 
 
 @dataclass(slots=True)
@@ -92,19 +97,30 @@ def level_of(metric: str, value: float | None) -> str | None:
     return reached[-1] if reached else None
 
 
+def _quality(before: dict[str, Any] | None, after: dict[str, Any] | None) -> float | None:
+    found = portfolio.quality_change(before, after)
+    return float(found["total"]) if found else None
+
+
 def _change(after: float | None, before: float | None) -> float | None:
     return None if after is None or before is None else after - before
 
 
 def agreement(steps: list[Step]) -> Agreement:
     """How well the estimate's changes track BRAIN's, over the steps where both are known."""
-    pairs = [
-        (s.estimate_combined, s.brain_combined)
+    # The combined-performance score where known, which is what the Desk ranks by.
+    moves = [
+        (s.estimate_quality if s.estimate_quality is not None else s.estimate_combined, s)
         for s in steps
-        if s.estimate_combined is not None and s.brain_combined is not None
+    ]
+    # A step where neither moved says nothing about whether they move together.
+    pairs = [
+        (move, s.brain_combined)
+        for move, s in moves
+        if move is not None and s.brain_combined is not None and (move or s.brain_combined)
     ]
     found = Agreement(len(pairs))
-    found.same_direction = sum(1 for e, b in pairs if e * b > 0 or (e == 0 and b == 0))
+    found.same_direction = sum(1 for e, b in pairs if e * b > 0)
     if len(pairs) < MIN_PAIRS:
         found.verdict = (
             f"{len(pairs)} of {MIN_PAIRS} steps so far: add a reading every few days, "
@@ -151,6 +167,7 @@ def estimate(
         combined=whole["sharpe"] if whole else None,
         power_pool=pooled["sharpe"] if pooled else None,
         alphas=len(ids),
+        figures=whole,
     )
 
 
@@ -181,6 +198,8 @@ def build(
         )
     for i in range(1, len(ordered)):
         a, b, ea, eb = ordered[i - 1], ordered[i], estimates[i - 1], estimates[i]
+        if a.read_on == b.read_on:
+            continue  # two readings of one day: a correction, not a step
         report.steps.append(
             Step(
                 since=a.read_on,
@@ -194,6 +213,7 @@ def build(
                 brain_power_pool=_change(b.power_pool, a.power_pool),
                 estimate_combined=_change(eb.combined, ea.combined),
                 estimate_power_pool=_change(eb.power_pool, ea.power_pool),
+                estimate_quality=_quality(ea.figures, eb.figures),
             )
         )
     report.agreement = agreement(report.steps)

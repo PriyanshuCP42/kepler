@@ -21,7 +21,7 @@ from datetime import date
 from typing import Any, Literal
 
 from fastapi import APIRouter
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 
 from ..agents import guard
@@ -61,6 +61,17 @@ class Figures(Out):
     margin: float
 
 
+class Impact(Out):
+    """How much better the pool's combined performance gets, as one share (0.02 is 2% better),
+    and each measure's part of it: see :func:`..tools.portfolio.quality_change`."""
+
+    total: float
+    #: By measure, signed so better is positive: less turnover or drawdown reads as a gain.
+    parts: dict[str, float]
+    #: ``2021-2023``, or ``all years`` where the recent years are not known.
+    window: str
+
+
 class Effect(Out):
     #: ``all`` or the partition, e.g. ``USA · D1 · Regular``.
     scope: str
@@ -71,6 +82,26 @@ class Effect(Out):
     #: Combined Alpha Performance is measured on.
     recent_before: Figures | None = None
     recent_after: Figures | None = None
+    impact: Impact | None = None
+
+    @model_validator(mode="after")
+    def _score(self) -> Effect:
+        """The combined-performance change, from the recent years where known."""
+        if self.impact is None:
+            recent = self.recent_before is not None and self.recent_after is not None
+            old, new = (
+                (self.recent_before, self.recent_after) if recent else (self.before, self.after)
+            )
+            found = portfolio.quality_change(
+                old.model_dump() if old else None, new.model_dump() if new else None
+            )
+            if found is not None:
+                self.impact = Impact(
+                    total=found["total"],
+                    parts=found["parts"],
+                    window=guard.RECENT_SPAN if recent else "all years",
+                )
+        return self
 
 
 class YearSharpe(Out):
@@ -239,15 +270,16 @@ def judge(
         before, after = (
             (effect.recent_before, effect.recent_after) if recent else (effect.before, effect.after)
         )
-        if before is None or after is None or before.sharpe is None or after.sharpe is None:
+        if before is None or after is None or effect.impact is None:
             continue
-        change = after.sharpe - before.sharpe
         where = "your pool" if effect.scope == WHOLE else effect.scope
         when = f" in {span}" if recent else ""
         reasons.append(
-            f"Combined Sharpe of {where}{when} {before.sharpe:.2f} → {after.sharpe:.2f}."
+            f"Combined performance of {where}{when} {effect.impact.total:+.1%}: "
+            + describe(before, after)
+            + "."
         )
-        hurts = hurts or change < 0
+        hurts = hurts or effect.impact.total < 0
     doubts = overfitting(view, test_sharpe) if view is not None else []
     if doubts:
         return "overfit", [*doubts, *reasons]
@@ -263,6 +295,19 @@ def judge(
         return "check", [*pending, *reasons]
     held = [] if view is None else [f"{view.held} of {view.measured} neighbours held."]
     return "ready", [f"Production Correlation {prod:.2f}.", *held, *reasons]
+
+
+def describe(before: Figures, after: Figures) -> str:
+    """Each measure's move, in a phrase: "Sharpe 2.10 → 2.15, margin 4.9 → 5.1 bps, ..."."""
+    bits: list[str] = []
+    if before.sharpe is not None and after.sharpe is not None:
+        bits.append(f"Sharpe {before.sharpe:.2f} → {after.sharpe:.2f}")
+    if before.fitness is not None and after.fitness is not None:
+        bits.append(f"Fitness {before.fitness:.2f} → {after.fitness:.2f}")
+    bits.append(f"margin {before.margin * 1e4:.1f} → {after.margin * 1e4:.1f} bps")
+    bits.append(f"turnover {before.turnover:.1%} → {after.turnover:.1%}")
+    bits.append(f"drawdown {before.drawdown:.2%} → {after.drawdown:.2%}")
+    return ", ".join(bits)
 
 
 def _figures(raw: dict[str, Any] | None) -> Figures | None:
@@ -498,12 +543,10 @@ _ORDER: dict[Readiness, int] = {
 
 
 def _rank(candidate: Candidate) -> tuple[int, float]:
-    """Ready first, then by how much it lifts your whole pool's combined Sharpe in the recent
-    years, the nearest to what BRAIN scores."""
-    change = sharpe_change(candidate.effects, WHOLE, recent=True)
-    if change is None:
-        change = sharpe_change(candidate.effects, WHOLE)
-    return _ORDER[candidate.readiness], change or 0.0
+    """Ready first, then by how much it improves your whole pool's combined performance in the
+    recent years, the nearest to what BRAIN scores."""
+    whole = next((e for e in candidate.effects if e.scope == WHOLE), None)
+    return _ORDER[candidate.readiness], whole.impact.total if whole and whole.impact else 0.0
 
 
 def sharpe_change(effects: list[Effect], scope: str, *, recent: bool = False) -> float | None:

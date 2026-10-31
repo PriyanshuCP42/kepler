@@ -11,6 +11,14 @@ export interface Figures {
   margin: number
 }
 
+/** How much better the pool's combined performance gets, as a share (0.02 is 2% better):
+ *  Sharpe, Fitness, margin, turnover and drawdown together, better always positive. */
+export interface Impact {
+  total: number
+  parts: Partial<Record<'sharpe' | 'fitness' | 'margin' | 'turnover' | 'drawdown', number>>
+  window: string
+}
+
 export interface Effect {
   /** `all` for your whole pool, else the partition, e.g. `USA · D1 · Regular`. */
   scope: string
@@ -22,6 +30,8 @@ export interface Effect {
    *  is measured on. */
   recentBefore: Figures | null
   recentAfter: Figures | null
+  /** Absent from a backend older than this screen. */
+  impact?: Impact | null
 }
 
 export interface YearSharpe {

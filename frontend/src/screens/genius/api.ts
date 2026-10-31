@@ -24,6 +24,8 @@ export interface Step {
   brainPowerPool: number | null
   estimateCombined: number | null
   estimatePowerPool: number | null
+  /** How much the estimate's combined-performance score moved, as a share. */
+  estimateQuality?: number | null
 }
 
 export interface Bar {

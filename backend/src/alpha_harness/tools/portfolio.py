@@ -168,6 +168,50 @@ def what_if(
     return out
 
 
+#: What a pool's combined performance is made of, and how much each counts. Sharpe and Fitness
+#: are its return for the risk; a high margin leaves more of it after trading costs; low
+#: turnover costs less to trade; a low drawdown loses less on the way.
+QUALITY_WEIGHTS = {
+    "sharpe": 0.30,
+    "fitness": 0.20,
+    "margin": 0.20,
+    "turnover": 0.15,
+    "drawdown": 0.15,
+}
+#: Measures where less is better.
+LOWER_IS_BETTER = frozenset({"turnover", "drawdown"})
+#: The most one measure's change counts for, so a near-zero starting value cannot swamp the rest.
+QUALITY_CAP = 0.5
+
+
+def quality_change(
+    before: dict[str, Any] | None, after: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """How much better a pool's combined performance gets, as one share: each measure's relative
+    change, signed so that better is positive (more Sharpe, Fitness, margin; less turnover,
+    drawdown), capped at :data:`QUALITY_CAP` and weighted by :data:`QUALITY_WEIGHTS`.
+
+    ``None`` without both sides. A measure missing or at zero before is left out and the
+    others' weights scaled up, so the total stays a weighted average.
+    """
+    if not before or not after:
+        return None
+    parts: dict[str, float] = {}
+    for key in QUALITY_WEIGHTS:
+        old, new = before.get(key), after.get(key)
+        if not isinstance(old, int | float) or not isinstance(new, int | float) or old == 0:
+            continue
+        change = (new - old) / abs(old)
+        if key in LOWER_IS_BETTER:
+            change = -change
+        parts[key] = max(-QUALITY_CAP, min(QUALITY_CAP, change))
+    weight = sum(QUALITY_WEIGHTS[k] for k in parts)
+    if not weight:
+        return None
+    total = sum(QUALITY_WEIGHTS[k] * v for k, v in parts.items()) / weight
+    return {"total": total, "parts": parts}
+
+
 def combined(
     series: dict[str, dict[date, tuple[float, float]]],
     meta: dict[str, dict[str, Any]],

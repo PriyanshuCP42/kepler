@@ -3651,6 +3651,7 @@ export interface components {
         Effect: {
             after: components["schemas"]["Figures"] | null;
             before: components["schemas"]["Figures"] | null;
+            impact?: components["schemas"]["Impact"] | null;
             /** Members */
             members: number;
             recentAfter?: components["schemas"]["Figures"] | null;
@@ -4049,6 +4050,8 @@ export interface components {
             estimateCombined: number | null;
             /** Estimatepowerpool */
             estimatePowerPool: number | null;
+            /** Estimatequality */
+            estimateQuality: number | null;
             /** Since */
             since: string;
             /** Submitted */
@@ -4062,6 +4065,10 @@ export interface components {
             alphas: number;
             /** Combined */
             combined: number | null;
+            /** Figures */
+            figures: {
+                [key: string]: number | null;
+            } | null;
             /** Powerpool */
             powerPool: number | null;
         };
@@ -4210,6 +4217,21 @@ export interface components {
             id: number;
             /** Name */
             name: string;
+        };
+        /**
+         * Impact
+         * @description How much better the pool's combined performance gets, as one share (0.02 is 2% better),
+         *     and each measure's part of it: see :func:`..tools.portfolio.quality_change`.
+         */
+        Impact: {
+            /** Parts */
+            parts: {
+                [key: string]: number;
+            };
+            /** Total */
+            total: number;
+            /** Window */
+            window: string;
         };
         /** KeyFailed */
         KeyFailed: {

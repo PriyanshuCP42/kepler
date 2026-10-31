@@ -36,6 +36,7 @@ class GeniusStep(Out):
     brain_power_pool: float | None
     estimate_combined: float | None
     estimate_power_pool: float | None
+    estimate_quality: float | None
 
 
 class GeniusAgreement(Out):
@@ -58,6 +59,7 @@ class GeniusToday(Out):
     combined: float | None
     power_pool: float | None
     alphas: int
+    figures: dict[str, float | int | None] | None
 
 
 class GeniusView(Out):

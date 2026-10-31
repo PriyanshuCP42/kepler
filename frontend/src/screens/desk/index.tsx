@@ -238,7 +238,7 @@ function ReadyImpact({
   return (
     <Panel
       title={count ? `If You Submit All ${count} Ready Alphas` : 'Your Genius Performance Bars'}
-      description={`Estimated from the combined Sharpe of your pool in ${span}, the nearest years to the hidden ones BRAIN scores (from 2024). BRAIN's own figure differs and is the one that counts: check your Genius page a few weeks after submitting. Bars: ${GENIUS_BARS.map(([name, bar]) => `${name} ${bar}`).join(', ')}.`}
+      description={`How much better your pool's combined performance gets, measured on Sharpe, Fitness, margin (higher is better), turnover and drawdown (lower is better) together, over ${span}: the nearest years to the hidden ones BRAIN scores (from 2024). BRAIN's own figure differs and is the one that counts: check your Genius page a few weeks after submitting. Bars: ${GENIUS_BARS.map(([name, bar]) => `${name} ${bar}`).join(', ')}.`}
     >
       <div className="grid gap-3 lg:grid-cols-2">
         {rows.map(([title, who, effect]) => (
@@ -248,12 +248,14 @@ function ReadyImpact({
               {who} · {fmt.int(effect?.members ?? 0)} now
               {count ? ` · ${ready?.join(', ')}` : ''}
             </div>
-            <div className="mt-2 text-body">
-              <span className="text-caption text-ink-subtle">{span}: </span>
-              <Change effect={effect} recent />
+            <div className="mt-2">
+              <Score effect={effect} />
             </div>
-            <div className="text-caption text-ink-subtle">
-              all years: <Change effect={effect} />
+            <div className="mt-1">
+              <Parts impact={effect?.impact} />
+            </div>
+            <div className="mt-1 text-caption text-ink-subtle">
+              Sharpe over all years: <Change effect={effect} />
             </div>
           </div>
         ))}
@@ -309,6 +311,58 @@ function PoolYears({
   )
 }
 
+const PART_LABELS = {
+  sharpe: 'Sharpe',
+  fitness: 'Fitness',
+  margin: 'Margin',
+  turnover: 'Turnover',
+  drawdown: 'Drawdown',
+} as const
+
+const percent = (v: number) => `${v > 0 ? '+' : ''}${fmt.pct(v, 1)}`
+
+/** The combined-performance change, and under it how the Sharpe moved. */
+function Score({ effect }: { effect: Effect | undefined }) {
+  const impact = effect?.impact
+  if (!effect) return <span className="text-ink-subtle">{DASH}</span>
+  if (!impact) return <Change effect={effect} recent />
+  return (
+    <span className="flex flex-col">
+      <span
+        className={cn(
+          'num text-body font-medium',
+          TEXT_TONE[impact.total >= 0 ? 'profit' : 'loss'],
+        )}
+        title={`Combined performance over ${impact.window}: Sharpe, Fitness, margin, turnover and drawdown together`}
+      >
+        {percent(impact.total)}
+      </span>
+      <span className="text-caption text-ink-subtle">
+        Sharpe <Change effect={effect} recent />
+      </span>
+    </span>
+  )
+}
+
+/** Each measure's part of the change, better always positive. */
+function Parts({ impact }: { impact: Effect['impact'] }) {
+  if (!impact) return null
+  return (
+    <span className="flex flex-wrap gap-x-3 gap-y-0.5 text-caption">
+      {(Object.keys(PART_LABELS) as (keyof typeof PART_LABELS)[]).map((key) => {
+        const v = impact.parts[key]
+        if (!isNum(v)) return null
+        return (
+          <span key={key} className="whitespace-nowrap">
+            <span className="text-ink-subtle">{PART_LABELS[key]} </span>
+            <span className={cn('num', TEXT_TONE[v >= 0 ? 'profit' : 'loss'])}>{percent(v)}</span>
+          </span>
+        )
+      })}
+    </span>
+  )
+}
+
 function Change({ effect, recent = false }: { effect: Effect | undefined; recent?: boolean }) {
   const shown = recent ? effect?.recentAfter : effect?.after
   const after = shown?.sharpe
@@ -340,7 +394,7 @@ function CandidatesPanel({ candidates, span }: { candidates: Candidate[]; span: 
   return (
     <Panel
       title="Candidates"
-      description="Critic passes that lead their family and are not submitted. Click a row for every combined figure."
+      description="Critic passes that lead their family and are not submitted. Each impact is how much better your pool's combined performance gets: Sharpe, Fitness and margin up, turnover and drawdown down, over the recent years. Click a row for every figure."
       bodyClassName={candidates.length ? 'p-0' : ''}
     >
       {candidates.length === 0 ? (
@@ -372,7 +426,7 @@ function CandidatesPanel({ candidates, span }: { candidates: Candidate[]; span: 
                 >
                   Combined Power Pool {span}
                 </th>
-                <th className="px-4 py-2 font-medium">Partition Sharpe {span}</th>
+                <th className="px-4 py-2 font-medium">Partition {span}</th>
                 <th className="px-4 py-2 font-medium">Pyramid</th>
               </tr>
             </thead>
@@ -437,20 +491,17 @@ function CandidatesPanel({ candidates, span }: { candidates: Candidate[]; span: 
                         <GuardBadge guard={c.guard} />
                       </td>
                       <td className="px-4 py-2">
-                        <Change effect={effectOf(c, true)} recent />
-                        <div className="text-caption text-ink-subtle">
-                          all years: <Change effect={effectOf(c, true)} />
-                        </div>
+                        <Score effect={effectOf(c, true)} />
                       </td>
                       <td className="px-4 py-2">
                         {c.powerPool ? (
-                          <Change effect={c.effects.find((e) => e.scope === POWER)} recent />
+                          <Score effect={c.effects.find((e) => e.scope === POWER)} />
                         ) : (
                           <span className="text-caption text-ink-subtle">not Power Pool</span>
                         )}
                       </td>
                       <td className="px-4 py-2">
-                        <Change effect={partition} recent />
+                        <Score effect={partition} />
                         {partition && (
                           <div className="text-caption text-ink-subtle">
                             {partition.scope} · {fmt.int(partition.members)} alphas
@@ -626,7 +677,7 @@ function Details({ candidate }: { candidate: Candidate }) {
           {candidate.expression}
         </code>
       )}
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="flex flex-col gap-4">
         {candidate.effects.map((effect) => (
           <table key={effect.scope} className="w-full text-body-compact">
             <thead>
@@ -639,23 +690,22 @@ function Details({ candidate }: { candidate: Candidate }) {
                       : effect.scope}{' '}
                   ({fmt.int(effect.members)})
                 </th>
-                <th className="py-1 pr-3 text-right font-medium">Now</th>
+                <th className="py-1 pr-3 text-right font-medium">Recent now</th>
+                <th className="py-1 pr-3 text-right font-medium">If submitted</th>
+                <th className="py-1 pr-3 text-right font-medium">All years now</th>
                 <th className="py-1 text-right font-medium">If submitted</th>
               </tr>
             </thead>
             <tbody>
-              <tr className="border-t border-hairline">
-                <td className="py-1 pr-3 text-ink-muted">Sharpe, recent years</td>
-                <td className="num py-1 pr-3 text-right text-ink-muted">
-                  {fmt.ratio(effect.recentBefore?.sharpe)}
-                </td>
-                <td className="num py-1 text-right text-ink">
-                  {fmt.ratio(effect.recentAfter?.sharpe)}
-                </td>
-              </tr>
               {ROWS.map((row) => (
                 <tr key={row.key} className="border-t border-hairline">
                   <td className="py-1 pr-3 text-ink-muted">{row.label}</td>
+                  <td className="num py-1 pr-3 text-right text-ink-muted">
+                    {effect.recentBefore ? row.show(effect.recentBefore[row.key]) : DASH}
+                  </td>
+                  <td className="num py-1 pr-3 text-right text-ink">
+                    {effect.recentAfter ? row.show(effect.recentAfter[row.key]) : DASH}
+                  </td>
                   <td className="num py-1 pr-3 text-right text-ink-muted">
                     {effect.before ? row.show(effect.before[row.key]) : DASH}
                   </td>
@@ -664,6 +714,22 @@ function Details({ candidate }: { candidate: Candidate }) {
                   </td>
                 </tr>
               ))}
+              {effect.impact && (
+                <tr className="border-t border-hairline">
+                  <td className="py-1 pr-3 font-medium text-ink">Combined performance</td>
+                  <td colSpan={4} className="py-1">
+                    <span
+                      className={cn(
+                        'num mr-3 font-medium',
+                        TEXT_TONE[effect.impact.total >= 0 ? 'profit' : 'loss'],
+                      )}
+                    >
+                      {percent(effect.impact.total)}
+                    </span>
+                    <Parts impact={effect.impact} />
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         ))}

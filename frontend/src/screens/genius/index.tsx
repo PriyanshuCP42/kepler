@@ -236,7 +236,7 @@ function AgreementPanel({ data }: { data: GeniusView }) {
   return (
     <Panel
       title="Does the Estimate Track BRAIN?"
-      description="Between each pair of readings, the alphas you submitted moved BRAIN's Combined Alpha Performance and Kepler's estimate. When the two move together, the Submission Desk's ranking can be trusted."
+      description="Between each pair of readings, the alphas you submitted moved BRAIN's Combined Alpha Performance and Kepler's estimate of it: Sharpe, Fitness, margin, turnover and drawdown together, as the Submission Desk ranks. When the two move together, the Desk's ranking can be trusted."
     >
       <div className="flex flex-col gap-3">
         <p className="text-body text-pretty text-ink">{a.verdict}</p>
@@ -252,17 +252,17 @@ function AgreementPanel({ data }: { data: GeniusView }) {
                   <th className="py-1.5 pr-3 font-medium">Between</th>
                   <th className="py-1.5 pr-3 text-right font-medium">Submitted</th>
                   <th className="py-1.5 pr-3 text-right font-medium">BRAIN Combined</th>
-                  <th className="py-1.5 pr-3 text-right font-medium">Estimate</th>
+                  <th className="py-1.5 pr-3 text-right font-medium">Estimated Performance</th>
+                  <th className="py-1.5 pr-3 text-right font-medium">Estimated Sharpe</th>
                   <th className="py-1.5 pr-3 text-right font-medium">BRAIN Power Pool</th>
                   <th className="py-1.5 text-right font-medium">Estimate</th>
                 </tr>
               </thead>
               <tbody>
                 {data.steps.map((s) => {
+                  const move = isNum(s.estimateQuality) ? s.estimateQuality : s.estimateCombined
                   const agree =
-                    isNum(s.brainCombined) && isNum(s.estimateCombined)
-                      ? s.brainCombined * s.estimateCombined > 0
-                      : null
+                    isNum(s.brainCombined) && isNum(move) ? s.brainCombined * move > 0 : null
                   return (
                     <tr key={`${s.since}:${s.until}`} className="border-t border-hairline">
                       <td className="num py-1.5 pr-3 text-ink-muted">
@@ -279,7 +279,13 @@ function AgreementPanel({ data }: { data: GeniusView }) {
                           'num py-1.5 pr-3 text-right',
                           agree === null ? 'text-ink-muted' : TEXT_TONE[agree ? 'profit' : 'loss'],
                         )}
+                        title="Sharpe, Fitness, margin, turnover and drawdown together"
                       >
+                        {isNum(s.estimateQuality)
+                          ? `${s.estimateQuality > 0 ? '+' : ''}${fmt.pct(s.estimateQuality, 1)}`
+                          : DASH}
+                      </td>
+                      <td className="num py-1.5 pr-3 text-right text-ink-muted">
                         {signed(s.estimateCombined)}
                       </td>
                       <td className="num py-1.5 pr-3 text-right text-ink">

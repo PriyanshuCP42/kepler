@@ -77,3 +77,33 @@ def test_build_lines_up_readings_and_steps():
 
 def test_bars_cover_every_genius_property():
     assert set(genius.BARS) == {"signals", "pyramids", "combined", "power_pool"}
+
+
+def test_steps_where_nothing_moved_are_not_agreement():
+    found = agreement([_step(0.0, 0.0), _step(0.0, 0.0), _step(0.5, -0.3)])
+    assert found.pairs == 1
+    assert found.same_direction == 0
+
+
+def test_two_readings_of_one_day_make_no_step():
+    members = [Member("a", date(2026, 8, 1), False)]
+    readings = [
+        GeniusReading(id=1, read_on=date(2026, 9, 1), combined=0.1),
+        GeniusReading(id=2, read_on=date(2026, 9, 1), combined=0.2),
+    ]
+    report = build(readings, members, {"a": _series(1)}, {})
+    assert report.steps == []
+
+
+def test_the_quality_score_rewards_less_drawdown_and_turnover():
+    from alpha_harness.tools.portfolio import quality_change
+
+    base = {"sharpe": 2.0, "fitness": 1.0, "margin": 5e-4, "turnover": 0.3, "drawdown": 0.05}
+    calmer = base | {"turnover": 0.2, "drawdown": 0.03}
+    found = quality_change(base, calmer)
+    assert found is not None and found["total"] > 0
+    assert found["parts"]["turnover"] > 0 and found["parts"]["drawdown"] > 0
+    worse = quality_change(base, base | {"drawdown": 0.10})
+    assert worse is not None and worse["total"] < 0
+    assert worse["parts"]["drawdown"] == -0.5  # capped
+    assert quality_change(None, base) is None
