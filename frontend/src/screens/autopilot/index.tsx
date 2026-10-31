@@ -5,8 +5,8 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link } from '@tanstack/react-router'
-import { RefreshCwIcon, ScaleIcon } from 'lucide-react'
+import { Link, useNavigate } from '@tanstack/react-router'
+import { RefreshCwIcon, ScaleIcon, WrenchIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import { errorMessage } from '@/api/http'
 import { cn } from '@/lib/cn'
@@ -18,6 +18,8 @@ import {
   autopilot,
   type Gate,
   type PreScreen,
+  REPAIR_KEY,
+  type RepairSummary,
   type ShortlistEntry,
   type Stage,
 } from '@/screens/autopilot/api'
@@ -101,6 +103,7 @@ export function AutopilotScreen() {
             <FunnelPanel stages={data.funnel} />
             <PreScreenPanel prescreen={data.prescreen} />
           </div>
+          <RepairPanel />
           <ShortlistPanel entries={data.shortlist} />
         </>
       )}
@@ -229,6 +232,120 @@ function PreScreenPanel({ prescreen }: { prescreen: PreScreen }) {
         </p>
       </div>
     </Panel>
+  )
+}
+
+// ── Repairs ─────────────────────────────────────────────────────────────────────────────
+
+function RepairPanel() {
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const query = useQuery({
+    queryKey: REPAIR_KEY,
+    queryFn: autopilot.repair,
+    refetchInterval: POLL_MS,
+  })
+  const plan = useMutation({
+    mutationFn: () => autopilot.planRepairs(),
+    onSuccess: (added) => {
+      void queryClient.invalidateQueries({ queryKey: REPAIR_KEY })
+      void queryClient.invalidateQueries({ queryKey: ['lab-tasks'] })
+      toast.success(`Repair task added: ${fmt.int(added.simulations)} simulations`, {
+        description: 'It is not started. Run it from Tasks.',
+        action: { label: 'Open Tasks', onClick: () => void navigate({ to: '/tasks' }) },
+      })
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  })
+  const data = query.data
+
+  return (
+    <Panel
+      title="Repairs"
+      description="Near misses re-run with the fix most likely to clear what failed. The Repair Engineer learns which fix works for which failure."
+      actions={
+        <Button
+          variant="primary"
+          loading={plan.isPending}
+          disabled={!data || data.waiting === 0}
+          onClick={() => plan.mutate()}
+        >
+          <WrenchIcon />
+          Plan Repairs
+        </Button>
+      }
+    >
+      {query.isError && !data ? (
+        <ErrorNotice error={query.error} title="Could not load the repairs" />
+      ) : !data ? (
+        <Skeleton className="h-32" label="Loading the repairs" />
+      ) : (
+        <RepairBody summary={data} />
+      )}
+    </Panel>
+  )
+}
+
+function RepairBody({ summary }: { summary: RepairSummary }) {
+  const judged = summary.fixed + summary.notFixed + summary.errors
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Metric boxed size="sm" label="Near Misses Waiting" value={fmt.int(summary.waiting)} />
+        <Metric boxed size="sm" label="Repairs Running" value={fmt.int(summary.pending)} />
+        <Metric
+          boxed
+          size="sm"
+          label="Fixed"
+          value={fmt.int(summary.fixed)}
+          tone={summary.fixed > 0 ? 'profit' : 'neutral'}
+          hint={
+            judged
+              ? `${fmt.pct(summary.fixed / judged, 0)} of ${fmt.int(judged)} judged`
+              : undefined
+          }
+        />
+        <Metric
+          boxed
+          size="sm"
+          label="Not Fixed"
+          value={fmt.int(summary.notFixed + summary.errors)}
+        />
+      </div>
+      {summary.moves.length === 0 ? (
+        <p className="text-body-compact text-pretty text-ink-subtle">
+          Nothing learned yet. Plan repairs, run the task from Tasks, and each fix's success rate
+          appears here as its results are judged.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-body-compact">
+            <thead>
+              <tr className="text-left text-caption text-ink-subtle">
+                <th className="py-1.5 pr-3 font-medium">Failure</th>
+                <th className="py-1.5 pr-3 font-medium">Fix</th>
+                <th className="py-1.5 pr-3 text-right font-medium">Fixed</th>
+                <th className="py-1.5 text-right font-medium">Rate</th>
+              </tr>
+            </thead>
+            <tbody>
+              {summary.moves.slice(0, 12).map((m) => (
+                <tr key={`${m.failure}:${m.move}`} className="border-t border-hairline">
+                  <td className="py-1.5 pr-3 num text-ink-muted">{m.failure}</td>
+                  <td className="py-1.5 pr-3 text-ink">{m.name}</td>
+                  <td className="py-1.5 pr-3 text-right num">
+                    {fmt.int(m.wins)} / {fmt.int(m.tries)}
+                  </td>
+                  <td className="py-1.5 text-right num">
+                    {m.tries ? fmt.pct(m.wins / m.tries, 0) : DASH}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   )
 }
 

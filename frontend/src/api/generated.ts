@@ -61,6 +61,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agents/repair": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Repair Summary
+         * @description Near misses waiting, repairs out, and which fixes have worked.
+         */
+        get: operations["repair_summary_api_agents_repair_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agents/repair/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Repair Task
+         * @description Write fixes for the best near misses as one task in Tasks, not started.
+         */
+        post: operations["repair_task_api_agents_repair_tasks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agents/shortlist": {
         parameters: {
             query?: never;
@@ -4702,6 +4742,61 @@ export interface components {
             /** Universes */
             universes: string[];
         };
+        /** RepairMoveStat */
+        RepairMoveStat: {
+            /** Failure */
+            failure: string;
+            /** Move */
+            move: string;
+            /** Name */
+            name: string;
+            /** Tries */
+            tries: number;
+            /** Wins */
+            wins: number;
+        };
+        /** RepairRequest */
+        RepairRequest: {
+            /**
+             * Alphas
+             * @default 100
+             */
+            alphas: number;
+            /**
+             * Cores
+             * @default 4
+             */
+            cores: number;
+            /**
+             * Peralpha
+             * @default 3
+             */
+            perAlpha: number;
+        };
+        /** RepairSummary */
+        RepairSummary: {
+            /** Errors */
+            errors: number;
+            /** Fixed */
+            fixed: number;
+            /** Moves */
+            moves: components["schemas"]["RepairMoveStat"][];
+            /** Notfixed */
+            notFixed: number;
+            /** Pending */
+            pending: number;
+            /** Waiting */
+            waiting: number;
+        };
+        /** RepairTaskAdded */
+        RepairTaskAdded: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Simulations */
+            simulations: number;
+        };
         /**
          * ResolveOptionsRequest
          * @description Settings chosen so far. Partial is fine — that is the point.
@@ -6045,6 +6140,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Started"];
+                };
+            };
+        };
+    };
+    repair_summary_api_agents_repair_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepairSummary"];
+                };
+            };
+        };
+    };
+    repair_task_api_agents_repair_tasks_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RepairRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepairTaskAdded"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

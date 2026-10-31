@@ -37,6 +37,8 @@ CORRELATION_BREAKER = "correlation-breaker"
 FIELDS_SAMPLER = "fields-sampler"
 #: Studies that combine your submitted Alphas into SuperAlphas (labs.super_alpha).
 SUPER_LAB = "super-alpha"
+#: Studies the Repair Engineer writes: near misses re-run with a fix each (agents.repair).
+REPAIR_SAMPLER = "repair"
 #: Studies that are research-lab tasks, run only from the Tasks tab, by their lab's name.
 TASK_SAMPLERS = {
     SEARCH_SAMPLER: "Search Lab",
@@ -47,6 +49,7 @@ TASK_SAMPLERS = {
     CORRELATION_BREAKER: "Correlation Breaker",
     FIELDS_SAMPLER: "Fields Sampler",
     SUPER_LAB: "Super Alpha Lab",
+    REPAIR_SAMPLER: "Repair Engineer",
 }
 
 
@@ -172,6 +175,18 @@ class SuperParams(TaskParams):
     recipes: list[str] = Field(default_factory=list)
 
 
+class RepairParams(TaskParams):
+    """Repair Engineer: one simulation per near miss and fix, every one written up front.
+
+    ``region`` and ``delay`` are the most common among the repairs, shown on the task card; the
+    task itself spans every market its near misses came from.
+    """
+
+    #: Near misses the task repairs, and the fixes it tries, for the task's detail line.
+    alphas: int = 0
+    moves: list[str] = Field(default_factory=list)
+
+
 BY_SAMPLER: dict[str, type[TaskParams]] = {
     SEARCH_SAMPLER: SearchParams,
     TEMPLATE_SAMPLER: TemplateParams,
@@ -181,6 +196,7 @@ BY_SAMPLER: dict[str, type[TaskParams]] = {
     CORRELATION_BREAKER: BreakerParams,
     FIELDS_SAMPLER: FieldsSamplerParams,
     SUPER_LAB: SuperParams,
+    REPAIR_SAMPLER: RepairParams,
 }
 
 

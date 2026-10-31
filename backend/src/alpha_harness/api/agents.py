@@ -5,10 +5,11 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from ..agents.critic import reasons_text
-from ..db.models import CriticVerdict
+from ..db.models import CriticVerdict, Study
 from ..schemas import Out
 from ..tasks import spawn
 from .deps import State, refuse
@@ -129,3 +130,56 @@ async def shortlist(state: State, limit: Annotated[int, Query(ge=1, le=100)] = 3
             for row, n in rows
         ]
     )
+
+
+class RepairMoveStat(Out):
+    failure: str
+    move: str
+    name: str
+    tries: int
+    wins: int
+
+
+class RepairSummary(Out):
+    #: Near misses not tried yet.
+    waiting: int
+    #: Repairs written but not yet judged, and how the judged ones came out.
+    pending: int
+    fixed: int
+    not_fixed: int
+    errors: int
+    #: What the Repair Engineer has learned, best first.
+    moves: list[RepairMoveStat]
+
+
+class RepairRequest(BaseModel):
+    #: Near misses to repair, best Critic score first.
+    alphas: int = Field(default=100, ge=1, le=500)
+    per_alpha: int = Field(default=3, ge=1, le=6, alias="perAlpha")
+    cores: int = Field(default=4, ge=1, le=8)
+
+    model_config = {"populate_by_name": True}
+
+
+class RepairTaskAdded(Out):
+    id: int
+    name: str
+    simulations: int
+
+
+@router.get("/repair")
+async def repair_summary(state: State) -> RepairSummary:
+    """Near misses waiting, repairs out, and which fixes have worked."""
+    return RepairSummary.model_validate(await state.repair.summary())
+
+
+@router.post("/repair/tasks", status_code=201)
+async def repair_task(body: RepairRequest, state: State) -> RepairTaskAdded:
+    """Write fixes for the best near misses as one task in Tasks, not started."""
+    added = await state.repair.add_task(body.alphas, body.per_alpha, body.cores)
+    if added is None:
+        raise refuse(422, "nothing_to_repair", "No near miss is waiting for a repair.")
+    async with state.db.session() as session:
+        row = await session.get(Study, added.id)
+        simulations = row.max_trials if row is not None else 0
+    return RepairTaskAdded(id=added.id, name=added.name, simulations=simulations)

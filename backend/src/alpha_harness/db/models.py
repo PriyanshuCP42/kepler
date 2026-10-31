@@ -547,6 +547,41 @@ class Trial(Base):
     )
 
 
+class RepairAttempt(Base):
+    """One fix the Repair Engineer tried on a near miss, and what came of it.
+
+    Linked to the trial that runs it by task and number, since a trial's id is only known once
+    the task is written. ``outcome`` is ``None`` until the Critic has judged the result.
+    """
+
+    __tablename__ = "repair_attempt"
+    __table_args__ = (Index("ix_repair_attempt_trial", "study_id", "trial_number"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    origin_alpha_id: Mapped[str] = mapped_column(String(64), index=True)
+    #: The failing metric it was chosen for, e.g. ``HIGH_TURNOVER``, ``DECAY``, ``POOL``.
+    failure: Mapped[str] = mapped_column(String(48))
+    move: Mapped[str] = mapped_column(String(48))
+    study_id: Mapped[int] = mapped_column(ForeignKey("study.id", ondelete="CASCADE"), index=True)
+    trial_number: Mapped[int] = mapped_column(Integer)
+    #: fixed | not_fixed | error | cancelled
+    outcome: Mapped[str | None] = mapped_column(String(12), index=True)
+    alpha_id: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
+    settled_at: Mapped[datetime | None] = mapped_column(UtcDateTime)
+
+
+class RepairStat(Base):
+    """How often one fix has repaired one kind of failure: what the Repair Engineer learns."""
+
+    __tablename__ = "repair_stat"
+
+    failure: Mapped[str] = mapped_column(String(48), primary_key=True)
+    move: Mapped[str] = mapped_column(String(48), primary_key=True)
+    tries: Mapped[int] = mapped_column(Integer, default=0)
+    wins: Mapped[int] = mapped_column(Integer, default=0)
+
+
 class TrialDistribution(Base):
     """One Optuna distribution, stored once and referenced by every trial that drew from it.
 

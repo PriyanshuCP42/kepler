@@ -52,7 +52,34 @@ export interface Autopilot {
   shortlist: ShortlistEntry[]
 }
 
+export interface RepairMove {
+  failure: string
+  move: string
+  name: string
+  tries: number
+  wins: number
+}
+
+export interface RepairSummary {
+  /** Near misses not tried yet. */
+  waiting: number
+  /** Repairs written but not yet judged, then how the judged ones came out. */
+  pending: number
+  fixed: number
+  notFixed: number
+  errors: number
+  /** What the Repair Engineer has learned, best first. */
+  moves: RepairMove[]
+}
+
+export interface RepairTaskAdded {
+  id: number
+  name: string
+  simulations: number
+}
+
 export const AUTOPILOT_KEY = ['autopilot'] as const
+export const REPAIR_KEY = ['autopilot', 'repair'] as const
 
 export const autopilot = {
   get: () => http.get<Autopilot>('/api/autopilot'),
@@ -60,4 +87,8 @@ export const autopilot = {
   train: () => http.post<{ started: boolean }>('/api/autopilot/prescreen/train'),
   /** Scores every alpha in the vault again. 409 while the Critic is already busy. */
   rescore: () => http.post<{ started: boolean }>('/api/agents/critic/rescore'),
+  repair: () => http.get<RepairSummary>('/api/agents/repair'),
+  /** Writes fixes for the best near misses as one task in Tasks, not started. */
+  planRepairs: (alphas = 100, perAlpha = 3, cores = 4) =>
+    http.post<RepairTaskAdded>('/api/agents/repair/tasks', { alphas, perAlpha, cores }),
 }

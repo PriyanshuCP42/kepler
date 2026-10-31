@@ -293,7 +293,10 @@ class BatchEngine:
         log.info("engine.enqueued", task=task, queued=len(queued), skipped=len(skipped))
         if self.bus is not None and queued:
             # Template and Search Lab work reaches the Validator through the Pre-screen.
-            source = "prescreen" if _lab_of(task) in SCREENED_LABS else "writers"
+            lab = _lab_of(task)
+            source = (
+                "prescreen" if lab in SCREENED_LABS else "repair" if lab == "repair" else "writers"
+            )
             self.bus.handoff(source, "validator", "candidates", len(queued), _lab_of(task))
             if skipped:
                 self.bus.count("validator", "duplicates skipped", len(skipped))

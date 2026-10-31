@@ -134,9 +134,7 @@ ROSTER: tuple[Agent, ...] = (
         1,
         "live",
     ),
-    Agent(
-        "repair", "Repair Engineer", "Fixes near misses by their failing metric", 1, 2, "planned"
-    ),
+    Agent("repair", "Repair Engineer", "Fixes near misses by their failing metric", 1, 2, "live"),
     Agent(
         "selector", "Selector", "Keeps the shortlist of distinct, submittable alphas", 1, 3, "live"
     ),

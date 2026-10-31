@@ -19,6 +19,7 @@ from .agents.bus import AgentBus
 from .agents.conductor import Conductor
 from .agents.critic import Critic
 from .agents.families import FamilyClerk
+from .agents.repair import RepairEngineer
 from .agents.screener import Screener
 from .brain.client import BrainClient
 from .brain.endpoints import BrainEndpoints
@@ -154,6 +155,7 @@ class AppState:
         from .api.lab_tasks import requeue
 
         self.conductor = Conductor(self, self.agents, requeue)
+        self.repair = RepairEngineer(self, self.agents)
 
         self._renew_lock = asyncio.Lock()
         self._last_session_check = float("-inf")
@@ -216,6 +218,7 @@ class AppState:
         await self.optimizer.start()
         await self.families.start()
         await self.screener.start()
+        await self.repair.start()
         await self.conductor.start()
         self._session_watch = asyncio.create_task(self._watch_session(), name="session-watch")
         log.info("startup.complete", data_dir=str(self.settings.data_dir))
@@ -347,6 +350,7 @@ class AppState:
         await self.conductor.stop()
         await self.families.stop()
         await self.screener.stop()
+        await self.repair.stop()
         await self.agents.stop()
         await self.optimizer.stop()
         await self.engine.stop()
