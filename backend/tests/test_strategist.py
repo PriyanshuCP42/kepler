@@ -72,3 +72,31 @@ def test_history_counts_each_alpha_against_its_first_fields_category():
         "recent_simulations": 1,
         "recent_passed": 1,
     }
+
+
+async def test_the_plan_shown_is_the_plan_written():
+    niches = [_niche(category=f"c{i}", multiplier=1.0 + i / 10) for i in range(8)]
+
+    class Fixed(st.Strategist):
+        async def niche_map(self):
+            return [
+                st.Niche(
+                    **{
+                        k: getattr(n, k)
+                        for k in (
+                            "region",
+                            "delay",
+                            "category",
+                            "category_name",
+                            "multiplier",
+                            "synced",
+                        )
+                    }
+                )
+                for n in niches
+            ]
+
+    strategist = Fixed(state=None, bus=None)
+    first = [n.category for n in await strategist.assessed()]
+    second = [n.category for n in await strategist.assessed()]
+    assert first == second

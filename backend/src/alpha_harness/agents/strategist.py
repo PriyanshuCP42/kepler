@@ -31,6 +31,7 @@ import structlog
 from fastapi import HTTPException
 from sqlalchemy import select
 
+from ..brain.filters import platform_midnight
 from ..brain.platform import PYRAMID_MIN_ALPHAS
 from ..brain.settings_schema import valid_values
 from ..catalog.pyramids import pyramid_grid
@@ -196,6 +197,10 @@ class Strategist:
         return list(niches.values())
 
     async def assessed(self, seed: int | None = None) -> list[Niche]:
+        """The niches scored and ranked. The draws are seeded by the platform's day, so the
+        plan shown is the plan written; it moves when the day or the history does."""
+        if seed is None:
+            seed = platform_midnight().date().toordinal()
         return assess(await self.niche_map(), random.Random(seed))
 
     async def _load_history(self) -> dict[tuple[str, int, str], dict[str, int]]:
