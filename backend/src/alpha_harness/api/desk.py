@@ -26,17 +26,18 @@ from sqlalchemy import select
 
 from ..agents import guard
 from ..brain.platform import (
+    IGNORED_CHECKS,
     POWER_POOL_CLASS,
     PROD_CORRELATION_CEILING,
     PYRAMID_MIN_ALPHAS,
     SELF_CORRELATION_CEILING,
 )
-from ..db.models import CriticVerdict
+from ..db.models import BrainCache, CriticVerdict
 from ..labs.fastexpr import ParseError, data_fields, parse
 from ..schemas import Out
 from ..tools import portfolio, power_pool
 from ..vault.store import json_list
-from ..vault.yields import checks_of, is_submitted
+from ..vault.yields import REFUSING, checks_of, is_submitted
 from .deps import State, refuse
 from .lab_tasks import AlphaIds, WorkflowStarted, check_prod_correlation, prod_correlations
 
@@ -49,7 +50,7 @@ WHOLE = "all"
 #: Performance combines.
 POWER = "Power Pool"
 
-Readiness = Literal["ready", "check", "hurts", "fading", "overfit", "blocked"]
+Readiness = Literal["ready", "check", "hurts", "fading", "overfit", "fails_check", "blocked"]
 
 
 class Figures(Out):
@@ -147,6 +148,30 @@ class GuardView(Out):
     full_sharpe: float | None = None
 
 
+class CheckLine(Out):
+    name: str
+    result: str
+    value: float | None
+    limit: float | None
+
+
+class SubmissionCheck(Out):
+    """BRAIN's own submission check, the one its Check Submission button runs, as last kept.
+
+    The checks an alpha is simulated with are provisional: a missed threshold reads WARNING
+    while other checks are still pending, and BRAIN's submission check may turn it into FAIL.
+    """
+
+    #: not_run | passes | fails
+    status: str
+    checked_at: str | None
+    failing: list[CheckLine]
+    #: Thresholds missed but only WARNING: what decides them, simulated or checked.
+    warned: list[CheckLine]
+    #: BRAIN asks for a Power Pool description it does not have yet (POWER_POOL_DESCRIPTION_*).
+    needs_description: bool
+
+
 class Candidate(Out):
     alpha_id: str
     region: str | None
@@ -165,6 +190,7 @@ class Candidate(Out):
     prod_correlation: float | None
     effects: list[Effect]
     guard: GuardView
+    submission: SubmissionCheck | None = None
     pyramid: Pyramid | None
     readiness: Readiness
     reasons: list[str]
@@ -245,14 +271,69 @@ _GUARD_PENDING = {
 }
 
 
+def _past_limit(check: dict[str, Any]) -> bool:
+    """Whether a check's value is on the wrong side of its limit: under a LOW_ one, over any
+    other (HIGH_ turnover, CONCENTRATED_WEIGHT)."""
+    value, limit = check.get("value"), check.get("limit")
+    if not isinstance(value, int | float) or not isinstance(limit, int | float):
+        return False
+    name = str(check.get("name", "")).upper()
+    return value < limit if name.startswith("LOW_") else value > limit
+
+
+def _line(check: dict[str, Any]) -> CheckLine:
+    value, limit = check.get("value"), check.get("limit")
+    return CheckLine(
+        name=str(check.get("name")),
+        result=str(check.get("result", "")).upper(),
+        value=float(value) if isinstance(value, int | float) else None,
+        limit=float(limit) if isinstance(limit, int | float) else None,
+    )
+
+
+def submission_of(
+    kept: dict[str, Any] | None, fetched_at: Any, simulated: list[dict[str, Any]]
+) -> SubmissionCheck:
+    """The submission check as kept, or ``not_run`` with what the simulation already warned."""
+    checks = (
+        [c for c in ((kept or {}).get("is") or {}).get("checks") or [] if isinstance(c, dict)]
+        if kept
+        else simulated
+    )
+    gating = [c for c in checks if str(c.get("name", "")).upper() not in IGNORED_CHECKS]
+    failing = [c for c in gating if str(c.get("result", "")).upper() in REFUSING]
+    warned = [c for c in gating if str(c.get("result", "")).upper() == "WARNING" and _past_limit(c)]
+    describe_needed = any(
+        str(c.get("name", "")).upper().startswith("POWER_POOL_DESCRIPTION")
+        and str(c.get("result", "")).upper() != "PASS"
+        for c in checks
+    )
+    status = "not_run" if kept is None else "fails" if failing else "passes"
+    return SubmissionCheck(
+        status=status,
+        checked_at=fetched_at.isoformat() if kept is not None and fetched_at else None,
+        failing=[_line(c) for c in failing] if kept is not None else [],
+        warned=[_line(c) for c in warned],
+        needs_description=describe_needed,
+    )
+
+
+def _check_text(c: CheckLine) -> str:
+    if c.value is None or c.limit is None:
+        return c.name
+    return f"{c.name} {c.value:g} against {c.limit:g}"
+
+
 def judge(
     prod: float | None,
     pool: float | None,
     effects: list[Effect],
     view: GuardView | None = None,
     test_sharpe: float | None = None,
+    submission: SubmissionCheck | None = None,
 ) -> tuple[Readiness, list[str]]:
-    """Ready, check first, lowers the pool, overfit, or blocked, with why."""
+    """Ready, check first, lowers the pool, fading, overfit, fails BRAIN's submission check, or
+    blocked, with why."""
     if prod is not None and prod >= PROD_CORRELATION_CEILING:
         return "blocked", [
             f"Production Correlation {prod:.2f} is over BRAIN's {PROD_CORRELATION_CEILING}."
@@ -261,6 +342,15 @@ def judge(
         return "blocked", [
             f"Correlates {pool:.2f} with your pool; BRAIN's limit is {SELF_CORRELATION_CEILING}."
         ]
+    if submission is not None and submission.status == "fails":
+        failed = "; ".join(_check_text(c) for c in submission.failing)
+        hint = (
+            " It relies on the Power Pool route, which needs a Power Pool description of 100 "
+            "characters or more: write one on its Alpha page, then check again."
+            if submission.needs_description
+            else " Repair it: the fixes aim at exactly these checks."
+        )
+        return "fails_check", [f"BRAIN's submission check refuses it: {failed}.{hint}"]
     reasons: list[str] = []
     hurts = False
     span = guard.RECENT_SPAN
@@ -289,6 +379,16 @@ def judge(
     if hurts:
         return "hurts", reasons
     pending = [] if prod is not None else ["Production Correlation not checked yet."]
+    if submission is not None and submission.status == "not_run":
+        warned = "; ".join(_check_text(c) for c in submission.warned)
+        pending.append(
+            "BRAIN's submission check not run yet"
+            + (
+                f": its simulation only warned on {warned}, which the check may turn into a fail."
+                if warned
+                else "."
+            )
+        )
     if view is not None and view.status in _GUARD_PENDING:
         pending.append(_GUARD_PENDING[view.status])
     if pending:
@@ -397,6 +497,13 @@ async def desk(state: State) -> Desk:
     siblings = await state.guard.siblings(rows)
 
     checks = {v.alpha_id: checks_of(stored[v.alpha_id].get("checks")) for v in chosen}
+    async with state.db.session() as session:
+        kept = {
+            row.key.removeprefix("check:"): row
+            for row in await session.scalars(
+                select(BrainCache).where(BrainCache.key.in_([f"check:{a}" for a in checks]))
+            )
+        }
     prod = await prod_correlations(state, list(checks), checks)
     categories, niches = await _pyramids(state)
 
@@ -429,8 +536,17 @@ async def desk(state: State) -> Desk:
         view = _guard_view(
             verdicts_of[v.alpha_id], siblings.get(v.alpha_id, 1), series.get(v.alpha_id), row
         )
+        held = kept.get(v.alpha_id)
+        submission = submission_of(
+            held.body if held else None, held.fetched_at if held else None, checks[v.alpha_id]
+        )
         readiness, reasons = judge(
-            prod.get(v.alpha_id), v.pool_correlation, found, view, row.get("test_sharpe")
+            prod.get(v.alpha_id),
+            v.pool_correlation,
+            found,
+            view,
+            row.get("test_sharpe"),
+            submission,
         )
         out.append(
             Candidate(
@@ -449,6 +565,7 @@ async def desk(state: State) -> Desk:
                 prod_correlation=prod.get(v.alpha_id),
                 effects=found,
                 guard=view,
+                submission=submission,
                 pyramid=pyramid,
                 readiness=readiness,
                 reasons=reasons,
@@ -533,8 +650,9 @@ def _guard_view(
 
 
 _ORDER: dict[Readiness, int] = {
-    "ready": 5,
-    "check": 4,
+    "ready": 6,
+    "check": 5,
+    "fails_check": 4,
     "hurts": 3,
     "fading": 2,
     "overfit": 1,
@@ -597,3 +715,63 @@ async def guard_task(body: GuardRequest, state: State) -> GuardTask:
     if added is None:
         raise refuse(409, "nothing_to_check", "Every candidate worth checking has its neighbours.")
     return GuardTask(id=added.id, name=added.name, finalists=len(wanted))
+
+
+@router.post("/submission-check", status_code=202)
+async def submission_check(state: State) -> WorkflowStarted:
+    """Run BRAIN's submission check, as its Check Submission button does, on every candidate
+    worth it that has not had one: Ready and Check First. In the background; no quota."""
+    from .alphas import check_alpha
+
+    found = await desk(state)
+    wanted = [
+        c.alpha_id
+        for c in found.candidates
+        if c.readiness in ("ready", "check")
+        and c.submission is not None
+        and c.submission.status == "not_run"
+    ]
+    if not wanted:
+        raise refuse(409, "nothing_to_check", "Every candidate worth it has been checked.")
+
+    async def work(task: Any) -> str:
+        failed = 0
+        for done, alpha_id in enumerate(wanted):
+            await state.tasks.update(
+                task, progress=done / len(wanted), detail=f"{done} of {len(wanted)}"
+            )
+            try:
+                await check_alpha(alpha_id, state)
+            # One alpha BRAIN cannot check must not stop the rest.
+            except Exception:  # noqa: BLE001
+                failed += 1
+        detail = f"Submission check for {len(wanted) - failed} candidates"
+        return detail + (f". BRAIN could not check {failed}" if failed else "")
+
+    try:
+        started = await state.backfill.start_job("submission-check", "Submission check", work)
+    except RuntimeError as exc:
+        raise refuse(409, "already_running", str(exc)) from exc
+    return WorkflowStarted(task_id=started)
+
+
+class RepairFailing(BaseModel):
+    cores: int = Field(default=4, ge=1, le=8)
+
+
+class RepairWritten(Out):
+    id: int
+    name: str
+    alphas: int
+
+
+@router.post("/repair", status_code=201)
+async def repair_failing(body: RepairFailing, state: State) -> RepairWritten:
+    """Write repairs for the candidates BRAIN's submission check refused, aimed at the checks
+    it refused, as one task in Tasks, not started."""
+    found = await desk(state)
+    ids = [c.alpha_id for c in found.candidates if c.readiness == "fails_check"]
+    added = await state.repair.add_task(len(ids), 3, body.cores, ids) if ids else None
+    if added is None:
+        raise refuse(409, "nothing_to_repair", "No candidate fails BRAIN's submission check.")
+    return RepairWritten(id=added.id, name=added.name, alphas=len(ids))

@@ -108,3 +108,72 @@ def test_an_empty_basket_changes_nothing():
     series = {"a": _series(1, days=900)}
     found = _basket(series, {}, {WHOLE: ["a"], POWER: []}, [], {})
     assert found[0].after == found[0].before
+
+
+def _kept(*checks: dict) -> dict:
+    return {"is": {"checks": list(checks)}}
+
+
+LOW_SHARPE_FAIL = {"name": "LOW_SHARPE", "result": "FAIL", "value": 1.17, "limit": 1.58}
+LOW_SHARPE_WARN = {"name": "LOW_SHARPE", "result": "WARNING", "value": 1.17, "limit": 1.58}
+NO_DESCRIPTION = {
+    "name": "POWER_POOL_DESCRIPTION_LENGTH",
+    "result": "WARNING",
+    "value": 0,
+    "limit": 100,
+}
+FITNESS_PASS = {"name": "LOW_FITNESS", "result": "PASS", "value": 1.39, "limit": 1.0}
+
+
+class TestSubmissionCheck:
+    def test_not_run_carries_what_the_simulation_warned(self):
+        from alpha_harness.api.desk import submission_of
+
+        found = submission_of(None, None, [LOW_SHARPE_WARN, FITNESS_PASS])
+        assert found.status == "not_run"
+        assert [c.name for c in found.warned] == ["LOW_SHARPE"]
+        assert found.failing == []
+
+    def test_a_refusal_fails_and_asks_for_the_description(self):
+        from datetime import UTC, datetime
+
+        from alpha_harness.api.desk import submission_of
+
+        found = submission_of(
+            _kept(LOW_SHARPE_FAIL, FITNESS_PASS, NO_DESCRIPTION),
+            datetime(2026, 10, 31, tzinfo=UTC),
+            [],
+        )
+        assert found.status == "fails"
+        assert [c.name for c in found.failing] == ["LOW_SHARPE"]
+        assert found.needs_description
+
+    def test_a_clean_check_passes(self):
+        from datetime import UTC, datetime
+
+        from alpha_harness.api.desk import submission_of
+
+        assert (
+            submission_of(_kept(FITNESS_PASS), datetime(2026, 10, 31, tzinfo=UTC), []).status
+            == "passes"
+        )
+
+    def test_a_refused_alpha_is_never_ready(self):
+        from datetime import UTC, datetime
+
+        from alpha_harness.api.desk import submission_of
+
+        refused = submission_of(
+            _kept(LOW_SHARPE_FAIL, NO_DESCRIPTION), datetime(2026, 10, 31, tzinfo=UTC), []
+        )
+        readiness, reasons = judge(0.3, 0.2, [], None, 1.5, refused)
+        assert readiness == "fails_check"
+        assert "Power Pool description" in reasons[0]
+
+    def test_unchecked_waits_for_brain(self):
+        from alpha_harness.api.desk import submission_of
+
+        unchecked = submission_of(None, None, [LOW_SHARPE_WARN])
+        readiness, reasons = judge(0.3, 0.2, [], None, 1.5, unchecked)
+        assert readiness == "check"
+        assert any("may turn into a fail" in r for r in reasons)

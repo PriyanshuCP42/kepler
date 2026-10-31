@@ -1022,6 +1022,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/desk/repair": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Repair Failing
+         * @description Write repairs for the candidates BRAIN's submission check refused, aimed at the checks
+         *     it refused, as one task in Tasks, not started.
+         */
+        post: operations["repair_failing_api_desk_repair_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/desk/submission-check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submission Check
+         * @description Run BRAIN's submission check, as its Check Submission button does, on every candidate
+         *     worth it that has not had one: Ready and Check First. In the background; no quota.
+         */
+        post: operations["submission_check_api_desk_submission_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/evolution-lab/options": {
         parameters: {
             query?: never;
@@ -3249,13 +3291,14 @@ export interface components {
              * Readiness
              * @enum {string}
              */
-            readiness: "ready" | "check" | "hurts" | "fading" | "overfit" | "blocked";
+            readiness: "ready" | "check" | "hurts" | "fading" | "overfit" | "fails_check" | "blocked";
             /** Reasons */
             reasons: string[];
             /** Region */
             region: string | null;
             /** Sharpe */
             sharpe: number | null;
+            submission?: components["schemas"]["SubmissionCheck"] | null;
             /** Testsharpe */
             testSharpe: number | null;
             /** Trainsharpe */
@@ -3429,6 +3472,17 @@ export interface components {
             title: string;
             /** Updatedat */
             updatedAt: string | null;
+        };
+        /** CheckLine */
+        CheckLine: {
+            /** Limit */
+            limit: number | null;
+            /** Name */
+            name: string;
+            /** Result */
+            result: string;
+            /** Value */
+            value: number | null;
         };
         /**
          * CheckResult
@@ -5493,6 +5547,14 @@ export interface components {
             /** Universes */
             universes: string[];
         };
+        /** RepairFailing */
+        RepairFailing: {
+            /**
+             * Cores
+             * @default 4
+             */
+            cores: number;
+        };
         /** RepairMoveStat */
         RepairMoveStat: {
             /** Failure */
@@ -5547,6 +5609,15 @@ export interface components {
             name: string;
             /** Simulations */
             simulations: number;
+        };
+        /** RepairWritten */
+        RepairWritten: {
+            /** Alphas */
+            alphas: number;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
         };
         /**
          * ResolveOptionsRequest
@@ -6012,6 +6083,25 @@ export interface components {
             n: number;
             /** Name */
             name: string | null;
+        };
+        /**
+         * SubmissionCheck
+         * @description BRAIN's own submission check, the one its Check Submission button runs, as last kept.
+         *
+         *     The checks an alpha is simulated with are provisional: a missed threshold reads WARNING
+         *     while other checks are still pending, and BRAIN's submission check may turn it into FAIL.
+         */
+        SubmissionCheck: {
+            /** Checkedat */
+            checkedAt: string | null;
+            /** Failing */
+            failing: components["schemas"]["CheckLine"][];
+            /** Needsdescription */
+            needsDescription: boolean;
+            /** Status */
+            status: string;
+            /** Warned */
+            warned: components["schemas"]["CheckLine"][];
         };
         /**
          * SubmissionOrder
@@ -8295,6 +8385,59 @@ export interface operations {
         };
     };
     check_candidates_api_desk_prod_correlation_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowStarted"];
+                };
+            };
+        };
+    };
+    repair_failing_api_desk_repair_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RepairFailing"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepairWritten"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    submission_check_api_desk_submission_check_post: {
         parameters: {
             query?: never;
             header?: never;

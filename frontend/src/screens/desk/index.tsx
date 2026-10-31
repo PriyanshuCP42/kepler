@@ -12,6 +12,7 @@ import {
   MicroscopeIcon,
   RefreshCwIcon,
   ShieldCheckIcon,
+  WrenchIcon,
 } from 'lucide-react'
 import { Fragment, useState } from 'react'
 import { toast } from 'sonner'
@@ -20,12 +21,14 @@ import { cn } from '@/lib/cn'
 import { DASH, fmt, isNum } from '@/lib/format'
 import {
   type Candidate,
+  type CheckLine,
   DESK_KEY,
   desk,
   type Effect,
   type Figures,
   type GuardView,
   type Readiness,
+  type SubmissionCheck,
   type YearSharpe,
 } from '@/screens/desk/api'
 import {
@@ -57,12 +60,12 @@ const READINESS: Record<Readiness, { label: string; tone: Tone; note: string }> 
   ready: {
     label: 'Ready',
     tone: 'profit',
-    note: 'Production Correlation checked and under the limit; lifts your combined Sharpe.',
+    note: "Passes BRAIN's own submission check and every test here; lifts your pool.",
   },
   check: {
     label: 'Check First',
     tone: 'warn',
-    note: 'Lifts your combined Sharpe; Production Correlation or the neighbour check still to do.',
+    note: "Lifts your pool; BRAIN's submission check or the neighbour check still to run.",
   },
   hurts: {
     label: 'Lowers Pool',
@@ -73,6 +76,11 @@ const READINESS: Record<Readiness, { label: string; tone: Tone; note: string }> 
     label: 'Fading',
     tone: 'loss',
     note: 'Weak in a recent year, or its recent years keep too little of its Sharpe.',
+  },
+  fails_check: {
+    label: 'Fails Check',
+    tone: 'loss',
+    note: "BRAIN's own submission check refuses it. Repair it, or write its Power Pool description.",
   },
   overfit: {
     label: 'Overfit',
@@ -109,7 +117,31 @@ export function DeskScreen() {
     },
     onError: (error) => toast.error(errorMessage(error)),
   })
+  const submissionCheck = useMutation({
+    mutationFn: desk.submissionCheck,
+    onSuccess: () =>
+      toast.success("Running BRAIN's submission check", {
+        description: 'The same check as Check Submission, on each candidate, in the background.',
+      }),
+    onError: (error) => toast.error(errorMessage(error)),
+  })
+  const repairFailing = useMutation({
+    mutationFn: () => desk.repairFailing(),
+    onSuccess: (task) => {
+      toast.success(`Repairs written for ${task.alphas} alphas BRAIN refused`, {
+        description: 'Aimed at the checks it refused. Run the task from Tasks.',
+        action: { label: 'Open Tasks', onClick: () => void navigate({ to: '/tasks' }) },
+      })
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  })
   const data = query.data
+  const unchecked =
+    data?.candidates.filter(
+      (c) =>
+        c.submission?.status === 'not_run' && (c.readiness === 'ready' || c.readiness === 'check'),
+    ).length ?? 0
+  const refused = data?.candidates.filter((c) => c.readiness === 'fails_check').length ?? 0
   const unguarded =
     data?.candidates.filter(
       (c) => c.guard.status === 'untested' && (c.readiness === 'ready' || c.readiness === 'check'),
@@ -123,6 +155,25 @@ export function DeskScreen() {
         description="What each shortlisted alpha would do to your combined performance if you submitted it, best first."
         actions={
           <>
+            <Button
+              variant="primary"
+              loading={submissionCheck.isPending}
+              disabled={!unchecked}
+              onClick={() => submissionCheck.mutate()}
+              title="BRAIN's own Check Submission, on each candidate: only what passes it is Ready"
+            >
+              <ShieldCheckIcon />
+              Run Submission Check{unchecked ? ` (${unchecked})` : ''}
+            </Button>
+            <Button
+              loading={repairFailing.isPending}
+              disabled={!refused}
+              onClick={() => repairFailing.mutate()}
+              title="Fixes aimed at the checks BRAIN refused"
+            >
+              <WrenchIcon />
+              Repair Failing{refused ? ` (${refused})` : ''}
+            </Button>
             <Button
               loading={check.isPending}
               disabled={!missing}
@@ -185,7 +236,7 @@ export function DeskScreen() {
 function Summary({ candidates, submitted }: { candidates: Candidate[]; submitted: number }) {
   const count = (r: Readiness) => candidates.filter((c) => c.readiness === r).length
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-7">
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">
       {(Object.keys(READINESS) as Readiness[]).map((r) => (
         <Metric
           key={r}
@@ -413,6 +464,7 @@ function CandidatesPanel({ candidates, span }: { candidates: Candidate[]; span: 
                 <th className="px-4 py-2 text-right font-medium">Test Sharpe</th>
                 <th className="px-4 py-2 text-right font-medium">Pool Corr</th>
                 <th className="px-4 py-2 text-right font-medium">Prod Corr</th>
+                <th className="px-4 py-2 font-medium">BRAIN Check</th>
                 <th className="px-4 py-2 font-medium">Neighbours</th>
                 <th
                   className="px-4 py-2 font-medium"
@@ -488,6 +540,9 @@ function CandidatesPanel({ candidates, span }: { candidates: Candidate[]; span: 
                         {isNum(c.prodCorrelation) ? fmt.ratio(c.prodCorrelation) : 'not checked'}
                       </td>
                       <td className="px-4 py-2">
+                        <SubmissionBadge submission={c.submission} />
+                      </td>
+                      <td className="px-4 py-2">
                         <GuardBadge guard={c.guard} />
                       </td>
                       <td className="px-4 py-2">
@@ -526,7 +581,7 @@ function CandidatesPanel({ candidates, span }: { candidates: Candidate[]; span: 
                     </tr>
                     {expanded && (
                       <tr className="border-b border-hairline-subtle bg-surface-1">
-                        <td colSpan={11} className="px-4 py-3">
+                        <td colSpan={12} className="px-4 py-3">
                           <Details candidate={c} />
                         </td>
                       </tr>
@@ -539,6 +594,79 @@ function CandidatesPanel({ candidates, span }: { candidates: Candidate[]; span: 
         </div>
       )}
     </Panel>
+  )
+}
+
+function SubmissionBadge({ submission }: { submission: SubmissionCheck | null | undefined }) {
+  if (!submission) return <span className="text-ink-subtle">{DASH}</span>
+  const shown = {
+    passes: { label: 'Passes', tone: 'profit' as Tone },
+    fails: { label: 'Fails', tone: 'loss' as Tone },
+    not_run: { label: 'Not run', tone: 'muted' as Tone },
+  }[submission.status]
+  return (
+    <span className="whitespace-nowrap">
+      <span className={cn('text-body-compact', TEXT_TONE[shown.tone])}>{shown.label}</span>
+      {submission.status === 'not_run' && submission.warned.length > 0 && (
+        <span
+          className={cn('ml-1.5 text-caption', TEXT_TONE.warn)}
+          title={submission.warned.map(checkText).join('; ')}
+        >
+          {submission.warned.length} warned
+        </span>
+      )}
+    </span>
+  )
+}
+
+const checkText = (c: CheckLine) =>
+  isNum(c.value) && isNum(c.limit) ? `${c.name} ${c.value} against ${c.limit}` : c.name
+
+function SubmissionDetails({
+  submission,
+  alphaId,
+}: {
+  submission: SubmissionCheck | null | undefined
+  alphaId: string
+}) {
+  if (!submission) return null
+  const lines = submission.status === 'fails' ? submission.failing : submission.warned
+  return (
+    <div className="flex flex-col gap-1 text-body-compact">
+      <span className="text-ink">
+        BRAIN's submission check:{' '}
+        {submission.status === 'passes'
+          ? 'passes'
+          : submission.status === 'fails'
+            ? 'refuses it'
+            : 'not run yet'}
+        {submission.checkedAt && (
+          <span className="text-ink-subtle"> · {fmt.ago(submission.checkedAt)}</span>
+        )}
+      </span>
+      {lines.length > 0 && (
+        <ul className="flex flex-col gap-0.5 text-ink-muted">
+          {lines.map((c) => (
+            <li
+              key={c.name}
+              className={submission.status === 'fails' ? TEXT_TONE.loss : TEXT_TONE.warn}
+            >
+              {c.result} · {checkText(c)}
+            </li>
+          ))}
+        </ul>
+      )}
+      {submission.needsDescription && (
+        <span className="text-ink-muted">
+          BRAIN asks for a Power Pool description it does not have (100 characters or more). An
+          alpha that misses a threshold is accepted only through the Power Pool route:{' '}
+          <Link to="/alpha/$alphaId" params={{ alphaId }} className={LINK}>
+            write its description on its Alpha page
+          </Link>
+          , save, then check it again.
+        </span>
+      )}
+    </div>
   )
 }
 
@@ -671,6 +799,7 @@ function Details({ candidate }: { candidate: Candidate }) {
           {fmt.ratio(candidate.fitness)}, Critic score {fmt.ratio(candidate.criticScore, 1)}.
         </li>
       </ul>
+      <SubmissionDetails submission={candidate.submission} alphaId={candidate.alphaId} />
       <GuardDetails guard={candidate.guard} testSharpe={candidate.testSharpe} />
       {candidate.expression && (
         <code className="block overflow-x-auto rounded bg-surface-2 px-2 py-1.5 text-caption text-ink">

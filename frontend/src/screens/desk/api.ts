@@ -46,7 +46,32 @@ export interface Pyramid {
   multiplier: number | null
 }
 
-export type Readiness = 'ready' | 'check' | 'hurts' | 'fading' | 'overfit' | 'blocked'
+export type Readiness =
+  | 'ready'
+  | 'check'
+  | 'hurts'
+  | 'fading'
+  | 'overfit'
+  | 'fails_check'
+  | 'blocked'
+
+export interface CheckLine {
+  name: string
+  result: string
+  value: number | null
+  limit: number | null
+}
+
+/** BRAIN's own submission check, as last kept. */
+export interface SubmissionCheck {
+  status: 'not_run' | 'passes' | 'fails'
+  checkedAt: string | null
+  failing: CheckLine[]
+  /** Thresholds missed but only WARNING. */
+  warned: CheckLine[]
+  /** BRAIN asks for a Power Pool description it does not have yet. */
+  needsDescription: boolean
+}
 
 export interface NeighbourResult {
   kind: string
@@ -93,6 +118,8 @@ export interface Candidate {
   prodCorrelation: number | null
   effects: Effect[]
   guard: GuardView
+  /** Absent from a backend older than this screen. */
+  submission?: SubmissionCheck | null
   pyramid: Pyramid | null
   readiness: Readiness
   reasons: string[]
@@ -120,6 +147,11 @@ export const desk = {
   get: () => http.get<Desk>('/api/desk'),
   /** Asks BRAIN for every missing Production Correlation, as a background job. */
   checkProd: () => http.post<{ taskId: string }>('/api/desk/prod-correlation'),
+  /** Runs BRAIN's submission check on every Ready or Check First candidate not checked yet. */
+  submissionCheck: () => http.post<{ taskId: string }>('/api/desk/submission-check'),
+  /** Writes repairs for the candidates BRAIN's submission check refused. */
+  repairFailing: (cores = 4) =>
+    http.post<{ id: number; name: string; alphas: number }>('/api/desk/repair', { cores }),
   /** Writes the best unchecked candidates' neighbours as one task in Tasks, not started. */
   guard: (limit = 20, cores = 4) =>
     http.post<{ id: number; name: string; finalists: number }>('/api/desk/guard', {

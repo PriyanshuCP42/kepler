@@ -398,9 +398,15 @@ class RepairEngineer:
             )
         return interleave([(alpha_id, (region, delay)) for alpha_id, region, delay in rows])
 
-    async def plan(self, limit: int, per_alpha: int = PER_ALPHA) -> list[Repair]:
-        """Fixes for the best ``limit`` untried near misses, checked against BRAIN's settings."""
-        ids = (await self.waiting())[:limit]
+    async def plan(
+        self, limit: int, per_alpha: int = PER_ALPHA, ids: list[str] | None = None
+    ) -> list[Repair]:
+        """Fixes for the best ``limit`` untried near misses, checked against BRAIN's settings.
+
+        ``ids`` names the alphas to fix instead: the Submission Desk's candidates that BRAIN's
+        submission check refused, whatever the Critic made of them.
+        """
+        ids = (ids if ids is not None else await self.waiting())[:limit]
         if not ids:
             return []
         async with self.state.db.session() as session:
@@ -448,9 +454,11 @@ class RepairEngineer:
                     break
         return repairs
 
-    async def add_task(self, limit: int, per_alpha: int, cores: int) -> AddedTask | None:
+    async def add_task(
+        self, limit: int, per_alpha: int, cores: int, ids: list[str] | None = None
+    ) -> AddedTask | None:
         """Write the repairs as one task in Tasks, not started. ``None`` when there are none."""
-        repairs = await self.plan(limit, per_alpha)
+        repairs = await self.plan(limit, per_alpha, ids)
         if not repairs:
             return None
         regions = Counter((r.request.settings.region, r.request.settings.delay) for r in repairs)
