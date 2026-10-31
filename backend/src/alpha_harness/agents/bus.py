@@ -137,7 +137,12 @@ ROSTER: tuple[Agent, ...] = (
         "selector", "Selector", "Keeps the shortlist of distinct, submittable alphas", 1, 3, "live"
     ),
     Agent(
-        "learning", "Learning Analyst", "Turns outcomes into tomorrow's priorities", 1, 4, "planned"
+        "learning",
+        "Learning Analyst",
+        "Learns which labs make good alphas, plans the day, tracks your Genius bars",
+        1,
+        4,
+        "live",
     ),
 )
 

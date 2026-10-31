@@ -269,6 +269,19 @@ def _number(value: Any) -> float | None:
     return float(value)
 
 
+def _line(found: dict[str, Any]) -> str:
+    bits = [str(found["level"])] if found.get("level") else []
+    if found.get("combined") is not None:
+        bits.append(f"combined {found['combined']:+.2f}")
+    if found.get("power_pool") is not None:
+        bits.append(f"Power Pool {found['power_pool']:+.2f}")
+    if found.get("signals") is not None:
+        bits.append(f"{found['signals']} signals")
+    if found.get("pyramids") is not None:
+        bits.append(f"{found['pyramids']} pyramids")
+    return ", ".join(bits) or "nothing computed yet"
+
+
 def _block(parent: dict[str, Any], key: str) -> dict[str, Any]:
     value = parent.get(key)
     return value if isinstance(value, dict) else {}
@@ -348,4 +361,14 @@ class GeniusSync:
             for key, value in found.items():
                 setattr(row, key, value)
         self.synced_at, self.error = datetime.now(UTC), None
+        if self.bus is not None:
+            self.bus.handoff("brain", "learning", "genius", 1, "Genius figures")
+            for label, value in (
+                ("Combined Alpha Performance", found["combined"]),
+                ("Combined Power Pool", found["power_pool"]),
+                ("Genius level", found["level"]),
+            ):
+                if value is not None:
+                    self.bus.set_stat("learning", label, value)
+            self.bus.say("learning", f"Synced your Genius figures: {_line(found)}.")
         return row

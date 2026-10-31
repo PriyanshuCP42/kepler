@@ -22,6 +22,8 @@ Desk come out of it first: they decide what is Ready.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import random
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -60,6 +62,8 @@ EXPLORE = 0.1
 REPAIR_PER_ALPHA = 3
 #: Simulations per neighbour check: one per neighbour.
 GUARD_PER_ALPHA = 6
+#: How often the plan is worked out again for Research HQ.
+REFRESH_SECONDS = 1800
 #: Candidates checked per plan.
 GUARD_LIMIT = 20
 #: The least the Strategist gives one pyramid's Search Lab task.
@@ -163,6 +167,7 @@ class Allocator:
     def __init__(self, state: Any, bus: AgentBus) -> None:
         self.state = state
         self.bus = bus
+        self._task: asyncio.Task[None] | None = None
 
     async def plan(self) -> Plan:
         ceiling = int(self.state.settings.simulation_operating_ceiling)
@@ -194,7 +199,47 @@ class Allocator:
         await self._capacities(arms)
         rng = random.Random(platform_midnight().date().toordinal())
         split(arms, budget, rng)
-        return Plan(ceiling, used, pending, budget, guard_sims, arms)
+        plan = Plan(ceiling, used, pending, budget, guard_sims, arms)
+        self._report(plan)
+        return plan
+
+    def _report(self, plan: Plan) -> None:
+        """What the Learning Analyst shows in Research HQ."""
+        learned = [a for a in plan.arms if a.simulations]
+        best = max(learned, key=lambda a: a.expected, default=None)
+        if best is not None:
+            self.bus.set_stat(
+                "learning", "best lab", f"{best.lab}: {best.expected:.1f} good per 1,000"
+            )
+        self.bus.set_stat("learning", "simulations to plan", plan.budget)
+        top = max(plan.arms, key=lambda a: a.planned, default=None)
+        if top is not None and plan.budget:
+            self.bus.say(
+                "learning",
+                f"Today's {plan.budget:,} simulations: most to the {top.lab} "
+                f"({top.planned:,}), learned from {WINDOW_DAYS} days of results.",
+            )
+        elif not plan.budget:
+            self.bus.say("learning", "Today's simulations are all spoken for.")
+
+    async def start(self) -> None:
+        self._task = asyncio.create_task(self._run(), name="learning-analyst")
+
+    async def stop(self) -> None:
+        if self._task is not None:
+            self._task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._task
+
+    async def _run(self) -> None:
+        """Keep what was learned fresh in Research HQ, even with Autopilot closed."""
+        await asyncio.sleep(90)
+        while True:
+            try:
+                await self.plan()
+            except Exception:
+                log.warning("learning.plan_failed", exc_info=True)
+            await asyncio.sleep(REFRESH_SECONDS)
 
     async def write(self, cores: int, start: bool) -> dict[str, Any]:
         """Write today's tasks as planned; with ``start``, queue them to run."""
@@ -248,8 +293,11 @@ class Allocator:
             )
         if start and written:
             await requeue(self.state, [t["id"] for t in written])
+        for arm, target in ((SEARCH, "strategist"), (REPAIR, "repair"), (HYPOTHESIS, "hypothesis")):
+            tasks = sum(1 for t in written if t["arm"] == arm)
+            self.bus.handoff("learning", target, "plan", tasks, "today's share")
         self.bus.say(
-            "conductor",
+            "learning",
             f"Wrote today's plan: {len(written)} tasks"
             + (", running." if start else "; run them from Tasks."),
         )
