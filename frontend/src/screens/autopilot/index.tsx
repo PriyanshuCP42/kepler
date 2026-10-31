@@ -132,7 +132,10 @@ function FunnelPanel({ stages }: { stages: Stage[] }) {
         {stages.map((stage, i) => {
           const previous = stages[i - 1]?.count
           const rate =
-            isNum(stage.count) && isNum(previous) && previous > 0 ? stage.count / previous : null
+            // The shortlist counts all time, so a rate against today's families means nothing.
+            stage.key !== 'shortlist' && isNum(stage.count) && isNum(previous) && previous > 0
+              ? stage.count / previous
+              : null
           return (
             <li key={stage.key} className="flex flex-col gap-1">
               <div className="flex items-baseline justify-between gap-3">
