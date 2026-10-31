@@ -61,6 +61,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agents/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Plan View
+         * @description Today's split of the simulation budget between the labs, learned from their yields.
+         */
+        get: operations["plan_view_api_agents_plan_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agents/plan/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Plan Tasks
+         * @description Write today's tasks as planned; with ``start``, run them too.
+         */
+        post: operations["plan_tasks_api_agents_plan_tasks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agents/repair": {
         parameters: {
             query?: never;
@@ -2901,6 +2941,37 @@ export interface components {
             /** Problems */
             problems: string[];
         };
+        /** ArmView */
+        ArmView: {
+            /** Action */
+            action: string;
+            /** Capacity */
+            capacity: number | null;
+            /** Expected */
+            expected: number;
+            /** Good */
+            good: number;
+            /** High */
+            high: number;
+            /** Key */
+            key: string;
+            /** Lab */
+            lab: string;
+            /** Low */
+            low: number;
+            /** Manual */
+            manual: boolean;
+            /** Note */
+            note: string | null;
+            /** Passed */
+            passed: number;
+            /** Planned */
+            planned: number;
+            /** Share */
+            share: number;
+            /** Simulations */
+            simulations: number;
+        };
         /** Assistant */
         Assistant: {
             /** Budget */
@@ -4549,12 +4620,60 @@ export interface components {
             test: components["schemas"]["Period"] | null;
             train: components["schemas"]["Period"] | null;
         };
+        /** PlanRequest */
+        PlanRequest: {
+            /**
+             * Cores
+             * @default 4
+             */
+            cores: number;
+            /**
+             * Start
+             * @default false
+             */
+            start: boolean;
+        };
         /** PlanTotals */
         PlanTotals: {
             /** Batches */
             batches: number;
             /** Total */
             total: number;
+        };
+        /** PlanView */
+        PlanView: {
+            /** Arms */
+            arms: components["schemas"]["ArmView"][];
+            /** Budget */
+            budget: number;
+            /** Ceiling */
+            ceiling: number;
+            /** Guard */
+            guard: number;
+            /** Pending */
+            pending: number;
+            /** Used */
+            used: number;
+            /** Windowdays */
+            windowDays: number;
+        };
+        /** PlanWritten */
+        PlanWritten: {
+            /** Notes */
+            notes: string[];
+            /** Started */
+            started: boolean;
+            /** Tasks */
+            tasks: components["schemas"]["PlannedTask"][];
+        };
+        /** PlannedTask */
+        PlannedTask: {
+            /** Arm */
+            arm: string;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
         };
         /** PortfolioMember */
         PortfolioMember: {
@@ -6671,6 +6790,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Started"];
+                };
+            };
+        };
+    };
+    plan_view_api_agents_plan_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanView"];
+                };
+            };
+        };
+    };
+    plan_tasks_api_agents_plan_tasks_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanWritten"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

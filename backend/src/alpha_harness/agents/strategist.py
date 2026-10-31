@@ -57,6 +57,8 @@ HYPOTHESES: dict[tuple[str, str], float] = {("USA", "risk"): 1.3, ("GLB", "risk"
 NEUTRALIZATIONS = ("SUBINDUSTRY", "INDUSTRY", "SECTOR", "MARKET")
 #: Datasets a Strategist task searches per niche.
 DATASETS_PER_TASK = 3
+#: Offered to every task, kept only where BRAIN's operators include them.
+VECTOR_OPERATORS = ("vec_avg",)
 
 
 def need(submitted: int) -> float:
@@ -267,6 +269,9 @@ class Strategist:
                 delay=niche["delay"],
                 universe=market["universe"],
                 dataset_ids=market["datasets"],
+                # Some datasets hold only vector fields (short interest, job postings); without
+                # a vector operator the Search Lab finds nothing to search in them.
+                vector_operators=list(VECTOR_OPERATORS),
                 neutralizations=market["neutralizations"],
                 cores=cores,
                 simulations=niche["simulations"],

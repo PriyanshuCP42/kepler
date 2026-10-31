@@ -7,9 +7,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from '@tanstack/react-router'
 import {
+  CalendarCheckIcon,
   CompassIcon,
   FlaskConicalIcon,
   LightbulbIcon,
+  PlayIcon,
   RefreshCwIcon,
   ScaleIcon,
   WrenchIcon,
@@ -28,6 +30,8 @@ import {
   type HypothesisEntry,
   type LabYield,
   type Niche,
+  PLAN_KEY,
+  type PlanArm,
   type PreScreen,
   REPAIR_KEY,
   type RepairSummary,
@@ -114,6 +118,7 @@ export function AutopilotScreen() {
         </div>
       ) : (
         <>
+          <TodayPanel />
           <div className="grid gap-4 xl:grid-cols-2">
             <FunnelPanel stages={data.funnel} />
             <PreScreenPanel prescreen={data.prescreen} />
@@ -126,6 +131,157 @@ export function AutopilotScreen() {
         </>
       )}
     </Page>
+  )
+}
+
+// ── Today's plan ────────────────────────────────────────────────────────────────────────
+
+function TodayPanel() {
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const query = useQuery({ queryKey: PLAN_KEY, queryFn: autopilot.plan, refetchInterval: 60_000 })
+  const write = useMutation({
+    mutationFn: (start: boolean) => autopilot.writeToday(start),
+    onSuccess: (done) => {
+      void queryClient.invalidateQueries({ queryKey: ['autopilot'] })
+      void queryClient.invalidateQueries({ queryKey: ['lab-tasks'] })
+      toast.success(
+        `${fmt.int(done.tasks.length)} tasks written${done.started ? ' and running' : ''}`,
+        {
+          description: done.notes.join(' ') || (done.started ? undefined : 'Run them from Tasks.'),
+          action: { label: 'Open Tasks', onClick: () => void navigate({ to: '/tasks' }) },
+        },
+      )
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  })
+  const plan = query.data
+
+  return (
+    <Panel
+      title="Today's Plan"
+      description={
+        plan
+          ? `Today's simulations split between the labs by how many good alphas each made per simulation over the last ${plan.windowDays} days: Critic passes that also hold up in 2021–2023. The split is redrawn each day, and every lab keeps a share so one that improves gets noticed.`
+          : undefined
+      }
+      actions={
+        <>
+          <Button
+            loading={write.isPending && write.variables === false}
+            disabled={!plan || (plan.budget <= 0 && !plan.guard) || write.isPending}
+            onClick={() => write.mutate(false)}
+          >
+            <CalendarCheckIcon />
+            Write Tasks
+          </Button>
+          <Button
+            variant="primary"
+            loading={write.isPending && write.variables === true}
+            disabled={!plan || (plan.budget <= 0 && !plan.guard) || write.isPending}
+            onClick={() => write.mutate(true)}
+          >
+            <PlayIcon />
+            Write and Start
+          </Button>
+        </>
+      }
+    >
+      {query.isError && !plan ? (
+        <ErrorNotice error={query.error} title="Could not load today's plan" />
+      ) : !plan ? (
+        <Skeleton className="h-40" label="Planning the day" />
+      ) : (
+        <div className="flex flex-col gap-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+            <Metric boxed size="sm" label="Daily Ceiling" value={fmt.int(plan.ceiling)} />
+            <Metric boxed size="sm" label="Used Today" value={fmt.int(plan.used)} />
+            <Metric
+              boxed
+              size="sm"
+              label="Still to Send"
+              value={fmt.int(plan.pending)}
+              hint="By tasks already running"
+            />
+            <Metric
+              boxed
+              size="sm"
+              label="Neighbour Checks"
+              value={fmt.int(plan.guard)}
+              hint="For the Submission Desk, first"
+            />
+            <Metric
+              boxed
+              size="sm"
+              label="To Plan"
+              value={fmt.int(plan.budget)}
+              tone={plan.budget > 0 ? 'profit' : 'neutral'}
+            />
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-body-compact">
+              <thead>
+                <tr className="text-left text-caption text-ink-subtle">
+                  <th className="py-1.5 pr-3 font-medium">Lab</th>
+                  <th className="py-1.5 pr-3 text-right font-medium">Good per 1,000</th>
+                  <th className="py-1.5 pr-3 text-right font-medium">
+                    Last {plan.windowDays} Days
+                  </th>
+                  <th className="py-1.5 pr-3 font-medium">Today</th>
+                  <th className="py-1.5 font-medium">Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                {plan.arms.map((arm) => (
+                  <PlanRow key={arm.key} arm={arm} />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </Panel>
+  )
+}
+
+function PlanRow({ arm }: { arm: PlanArm }) {
+  return (
+    <tr className="border-t border-hairline">
+      <td className="py-2 pr-3">
+        <div className="text-ink">{arm.lab}</div>
+        <div className="text-caption text-ink-subtle">{arm.action}</div>
+      </td>
+      <td className="num py-2 pr-3 text-right">
+        <div className="text-ink">{fmt.ratio(arm.expected, 1)}</div>
+        <div className="text-caption text-ink-subtle">
+          {fmt.ratio(arm.low, 1)}–{fmt.ratio(arm.high, 1)}
+        </div>
+      </td>
+      <td className="num py-2 pr-3 text-right text-ink-muted">
+        <div>{fmt.int(arm.simulations)} sims</div>
+        <div className="text-caption text-ink-subtle">
+          {fmt.int(arm.passed)} passed · {fmt.int(arm.good)} good
+        </div>
+      </td>
+      <td className="py-2 pr-3">
+        <div className="flex items-center gap-2">
+          <div className="h-1.5 w-24 overflow-hidden rounded-pill bg-surface-3">
+            <div
+              className={cn(
+                'h-full rounded-pill',
+                arm.manual ? 'bg-ink-tertiary' : 'bg-pnl-positive',
+              )}
+              style={{ width: `${Math.round(arm.share * 100)}%` }}
+            />
+          </div>
+          <span className="num whitespace-nowrap text-ink">
+            {fmt.int(arm.planned)}
+            {arm.manual && <span className="text-ink-subtle"> suggested</span>}
+          </span>
+        </div>
+      </td>
+      <td className="py-2 text-caption text-pretty text-ink-subtle">{arm.note}</td>
+    </tr>
   )
 }
 

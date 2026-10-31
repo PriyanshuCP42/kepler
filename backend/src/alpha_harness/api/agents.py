@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
+from ..agents.allocator import WINDOW_DAYS
 from ..agents.critic import reasons_text
 from ..db.models import CriticVerdict, Study
 from ..schemas import Out
@@ -254,3 +256,77 @@ async def strategist_tasks(body: StrategistRequest, state: State) -> StrategistT
     if not result["added"] and not result["skipped"]:
         raise refuse(422, "nothing_to_plan", "No niche can be planned right now.")
     return StrategistTasks.model_validate(result)
+
+
+class ArmView(Out):
+    key: str
+    lab: str
+    action: str
+    #: Over the learning window: judged simulations, Critic passes, and passes holding up in
+    #: the recent years.
+    simulations: int
+    passed: int
+    good: int
+    #: Good alphas per 1,000 simulations: learned mean, and its 5th and 95th percentile.
+    expected: float
+    low: float
+    high: float
+    share: float
+    planned: int
+    capacity: int | None
+    manual: bool
+    note: str | None
+
+
+class PlanView(Out):
+    ceiling: int
+    used: int
+    pending: int
+    #: Left for new tasks today, after neighbour checks.
+    budget: int
+    guard: int
+    window_days: int
+    arms: list[ArmView]
+
+
+class PlanRequest(BaseModel):
+    cores: int = Field(default=4, ge=1, le=8)
+    #: Queue the tasks to run, not only write them.
+    start: bool = False
+
+
+class PlannedTask(Out):
+    id: int
+    name: str
+    arm: str
+
+
+class PlanWritten(Out):
+    tasks: list[PlannedTask]
+    notes: list[str]
+    started: bool
+
+
+@router.get("/plan")
+async def plan_view(state: State) -> PlanView:
+    """Today's split of the simulation budget between the labs, learned from their yields."""
+    plan = await state.allocator.plan()
+    return PlanView(
+        ceiling=plan.ceiling,
+        used=plan.used,
+        pending=plan.pending,
+        budget=plan.budget,
+        guard=plan.guard,
+        window_days=WINDOW_DAYS,
+        arms=[ArmView.model_validate(asdict(a)) for a in plan.arms],
+    )
+
+
+@router.post("/plan/tasks", status_code=201)
+async def plan_tasks(body: PlanRequest, state: State) -> PlanWritten:
+    """Write today's tasks as planned; with ``start``, run them too."""
+    plan = await state.allocator.plan()
+    if plan.budget <= 0 and not plan.guard:
+        raise refuse(409, "no_budget", "Today's simulations are already spoken for.")
+    written = await state.allocator.write(body.cores, body.start)
+    return PlanWritten.model_validate(written)

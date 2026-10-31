@@ -15,6 +15,7 @@ from sqlalchemy import select
 
 from . import preferences, updates
 from .account import AuthService, PlatformMetadata
+from .agents.allocator import Allocator
 from .agents.bus import AgentBus
 from .agents.conductor import Conductor
 from .agents.critic import Critic
@@ -164,6 +165,7 @@ class AppState:
         self.strategist = Strategist(self, self.agents)
         self.guard = Guard(self, self.agents)
         self.hypotheses = HypothesisWriter(self, self.agents)
+        self.allocator = Allocator(self, self.agents)
 
         self._renew_lock = asyncio.Lock()
         self._last_session_check = float("-inf")

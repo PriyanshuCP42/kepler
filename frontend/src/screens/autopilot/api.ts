@@ -156,10 +156,47 @@ export interface HypothesesView {
   hypotheses: HypothesisEntry[]
 }
 
+export interface PlanArm {
+  key: 'search' | 'repair' | 'hypothesis' | 'template'
+  lab: string
+  action: string
+  /** Over the learning window. `good` are Critic passes that hold up in the recent years. */
+  simulations: number
+  passed: number
+  good: number
+  /** Good alphas per 1,000 simulations: learned mean and its 5th to 95th percentile. */
+  expected: number
+  low: number
+  high: number
+  share: number
+  planned: number
+  capacity: number | null
+  /** Its share is a suggestion: the plan cannot write it for you. */
+  manual: boolean
+  note: string | null
+}
+
+export interface TodayPlan {
+  ceiling: number
+  used: number
+  pending: number
+  budget: number
+  guard: number
+  windowDays: number
+  arms: PlanArm[]
+}
+
+export interface PlanWritten {
+  tasks: { id: number; name: string; arm: string }[]
+  notes: string[]
+  started: boolean
+}
+
 export const AUTOPILOT_KEY = ['autopilot'] as const
 export const STRATEGIST_KEY = ['autopilot', 'strategist'] as const
 export const REPAIR_KEY = ['autopilot', 'repair'] as const
 export const HYPOTHESES_KEY = ['autopilot', 'hypotheses'] as const
+export const PLAN_KEY = ['autopilot', 'plan'] as const
 
 export const autopilot = {
   get: () => http.get<Autopilot>('/api/autopilot'),
@@ -172,6 +209,10 @@ export const autopilot = {
   /** One Search Lab task per planned niche, not started. */
   writePlan: (niches = 5, simulations = 1500, cores = 4) =>
     http.post<StrategistTasks>('/api/agents/strategist/tasks', { niches, simulations, cores }),
+  plan: () => http.get<TodayPlan>('/api/agents/plan'),
+  /** Writes today's tasks as planned; with `start`, queues them to run. */
+  writeToday: (start: boolean, cores = 4) =>
+    http.post<PlanWritten>('/api/agents/plan/tasks', { start, cores }),
   hypotheses: () => http.get<HypothesesView>('/api/hypotheses'),
   /** Asks the LLM for hypotheses in the background. 409 while it is already writing. */
   writeHypotheses: () => http.post<{ started: boolean }>('/api/hypotheses/write', {}),
