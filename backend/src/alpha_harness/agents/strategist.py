@@ -258,7 +258,7 @@ class Strategist:
         skipped: list[dict[str, Any]] = []
         for niche in planned:
             label = f"{niche['region']} D{niche['delay']} {niche['categoryName']}"
-            market = await self._market(niche, schema)
+            market = await self.market(niche, schema)
             if market is None:
                 skipped.append({"niche": label, "reason": "No dataset of it is downloaded."})
                 continue
@@ -290,7 +290,7 @@ class Strategist:
             )
         return {"added": added, "skipped": skipped}
 
-    async def _market(self, niche: dict[str, Any], schema: dict[str, Any]) -> dict[str, Any] | None:
+    async def market(self, niche: dict[str, Any], schema: dict[str, Any]) -> dict[str, Any] | None:
         """The universe, the least crowded datasets and the neutralizations for one niche."""
         rows = await self.state.catalog.query(
             "SELECT dataset_id, universe, coalesce(alpha_count, 0) AS alphas, "

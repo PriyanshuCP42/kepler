@@ -601,6 +601,35 @@ class GuardCheck(Base):
     created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow)
 
 
+class Hypothesis(Base):
+    """One idea the Hypothesis Writer proposed, the expressions that test it, and its task.
+
+    Its trials are ``trial_from`` up to ``trial_to`` of ``study_id``, once it is simulated.
+    """
+
+    __tablename__ = "hypothesis"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utcnow, index=True)
+    region: Mapped[str] = mapped_column(String(16))
+    delay: Mapped[int] = mapped_column(Integer)
+    universe: Mapped[str] = mapped_column(String(32))
+    category: Mapped[str] = mapped_column(String(64))
+    dataset_id: Mapped[str] = mapped_column(String(64), index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    rationale: Mapped[str] = mapped_column(Text)
+    expressions: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    neutralizations: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    model: Mapped[str | None] = mapped_column(String(128))
+    #: Switched off by you: it is never simulated.
+    enabled: Mapped[bool] = mapped_column(default=True)
+    study_id: Mapped[int | None] = mapped_column(
+        ForeignKey("study.id", ondelete="SET NULL"), index=True
+    )
+    trial_from: Mapped[int | None] = mapped_column(Integer)
+    trial_to: Mapped[int | None] = mapped_column(Integer)
+
+
 class TrialDistribution(Base):
     """One Optuna distribution, stored once and referenced by every trial that drew from it.
 

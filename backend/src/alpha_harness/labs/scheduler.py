@@ -25,6 +25,7 @@ from .params import (
     FIELDS_SAMPLER,
     GA_SAMPLER,
     GUARD_SAMPLER,
+    HYPOTHESIS_SAMPLER,
     POWER_POOL_SAMPLER,
     REPAIR_SAMPLER,
     SEARCH_SAMPLER,
@@ -463,6 +464,7 @@ async def advance(optimizer: Optimizer, study_id: int) -> int:
         SUPER_LAB,
         REPAIR_SAMPLER,
         GUARD_SAMPLER,
+        HYPOTHESIS_SAMPLER,
     ):
         from ..tools import settings_sampler  # same cycle: it builds on this module
 

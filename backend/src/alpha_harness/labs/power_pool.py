@@ -243,7 +243,7 @@ def operators_text(operators: list[dict[str, Any]]) -> str:
     return "\n".join(f"## {c}\n" + "\n".join(lines) for c, lines in sorted(by.items()))
 
 
-def _line(f: Field) -> str:
+def field_line(f: Field) -> str:
     coverage = "?" if f.coverage is None else f"{f.coverage * 100:.0f}%"
     # The region count only exists in the region-agnostic market, and there it decides
     # whether two fields can appear in one expression at all.
@@ -346,7 +346,7 @@ def user_prompt(
     tail = "\n\n".join(
         [
             "PRICE AND VOLUME FIELDS · count as data fields\n"
-            + "\n".join(_line(f) for f in ctx.basics),
+            + "\n".join(field_line(f) for f in ctx.basics),
             "GROUPING_FIELDS FIELDS · not counted\n" + ", ".join(ctx.groups),
             f"YOUR EARLIER ALPHAS ON {ctx.id}\n{memory}",
             f"Write {PER_CALL} new Power Pool Alphas that use {ctx.id}.",
@@ -358,7 +358,7 @@ def user_prompt(
     ordered = ctx.fields[start:] + ctx.fields[:start]
     lines: list[str] = []
     for f in ordered[:FIELDS_PER_CALL]:
-        line = _line(f)
+        line = field_line(f)
         if room - len(line) < 0:
             break
         room -= len(line) + 1

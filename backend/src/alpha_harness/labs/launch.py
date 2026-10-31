@@ -27,6 +27,7 @@ from .params import (
     FIELDS_SAMPLER,
     GA_SAMPLER,
     GUARD_SAMPLER,
+    HYPOTHESIS_SAMPLER,
     POWER_POOL_SAMPLER,
     REPAIR_SAMPLER,
     SEARCH_SAMPLER,
@@ -62,6 +63,7 @@ _TASKS: dict[str, tuple[str, str]] = {
     SUPER_LAB: ("super-alpha", "sharpe"),
     REPAIR_SAMPLER: ("repair", "sharpe"),
     GUARD_SAMPLER: ("guard", "sharpe"),
+    HYPOTHESIS_SAMPLER: ("hypothesis", CRITIC),
 }
 
 

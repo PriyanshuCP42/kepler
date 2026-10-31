@@ -1096,6 +1096,81 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/hypotheses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Hypotheses */
+        get: operations["hypotheses_api_hypotheses_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/hypotheses/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Task
+         * @description Every switched-on hypothesis not yet tested, as one task in Tasks, not started.
+         */
+        post: operations["add_task_api_hypotheses_tasks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/hypotheses/write": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write
+         * @description Ask the LLM for hypotheses on the Strategist's top pyramids, in the background. Uses the
+         *     LLM's budget, no simulation quota.
+         */
+        post: operations["write_api_hypotheses_write_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/hypotheses/{hypothesis_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Toggle */
+        patch: operations["toggle_api_hypotheses__hypothesis_id__patch"];
+        trace?: never;
+    };
     "/api/lab-tasks": {
         parameters: {
             query?: never;
@@ -3868,6 +3943,59 @@ export interface components {
             /** Websocketclients */
             websocketClients: number;
         };
+        /** Hypotheses */
+        Hypotheses: {
+            /** Hypotheses */
+            hypotheses: components["schemas"]["HypothesisOut"][];
+            /** Note */
+            note: string | null;
+            /** Status */
+            status: string;
+        };
+        /** HypothesisOut */
+        HypothesisOut: {
+            /** Bestsharpe */
+            bestSharpe: number | null;
+            /** Category */
+            category: string;
+            /** Createdat */
+            createdAt: string;
+            /** Datasetid */
+            datasetId: string;
+            /** Delay */
+            delay: number;
+            /** Enabled */
+            enabled: boolean;
+            /** Expressions */
+            expressions: string[];
+            /** Finished */
+            finished: number;
+            /** Id */
+            id: number;
+            /** Model */
+            model: string | null;
+            /** Passed */
+            passed: number;
+            /** Rationale */
+            rationale: string;
+            /** Region */
+            region: string;
+            /** Simulations */
+            simulations: number;
+            /** Title */
+            title: string;
+            /** Universe */
+            universe: string;
+        };
+        /** HypothesisTask */
+        HypothesisTask: {
+            /** Hypotheses */
+            hypotheses: number;
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+        };
         /** KeyFailed */
         KeyFailed: {
             /** Error */
@@ -5958,6 +6086,14 @@ export interface components {
             /** Removed */
             removed: number;
         };
+        /** TaskRequest */
+        TaskRequest: {
+            /**
+             * Cores
+             * @default 4
+             */
+            cores: number;
+        };
         /** TasksSummary */
         TasksSummary: {
             /** Busy */
@@ -6192,6 +6328,11 @@ export interface components {
             /** Used */
             used: number;
         };
+        /** Toggle */
+        Toggle: {
+            /** Enabled */
+            enabled: boolean;
+        };
         /**
          * TreeNode
          * @description One step of a template, as the Blocks view draws it. ``...`` is a name: an empty input.
@@ -6392,6 +6533,19 @@ export interface components {
         WorkflowStarted: {
             /** Taskid */
             taskId: string;
+        };
+        /** WriteRequest */
+        WriteRequest: {
+            /**
+             * Niches
+             * @default 3
+             */
+            niches: number;
+            /**
+             * Perniche
+             * @default 4
+             */
+            perNiche: number;
         };
         /** YearRow */
         YearRow: {
@@ -7963,6 +8117,127 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Health"];
+                };
+            };
+        };
+    };
+    hypotheses_api_hypotheses_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Hypotheses"];
+                };
+            };
+        };
+    };
+    add_task_api_hypotheses_tasks_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HypothesisTask"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    write_api_hypotheses_write_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Started"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    toggle_api_hypotheses__hypothesis_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                hypothesis_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Toggle"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Toggle"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

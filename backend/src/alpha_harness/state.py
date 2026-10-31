@@ -20,6 +20,7 @@ from .agents.conductor import Conductor
 from .agents.critic import Critic
 from .agents.families import FamilyClerk
 from .agents.guard import Guard
+from .agents.hypothesis import HypothesisWriter
 from .agents.overlap import Overlap
 from .agents.repair import RepairEngineer
 from .agents.screener import Screener
@@ -162,6 +163,7 @@ class AppState:
         self.repair = RepairEngineer(self, self.agents)
         self.strategist = Strategist(self, self.agents)
         self.guard = Guard(self, self.agents)
+        self.hypotheses = HypothesisWriter(self, self.agents)
 
         self._renew_lock = asyncio.Lock()
         self._last_session_check = float("-inf")
@@ -357,6 +359,7 @@ class AppState:
         await self.families.stop()
         await self.screener.stop()
         await self.repair.stop()
+        await self.hypotheses.stop()
         await self.agents.stop()
         await self.optimizer.stop()
         await self.engine.stop()

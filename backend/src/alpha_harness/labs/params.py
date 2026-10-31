@@ -41,6 +41,8 @@ SUPER_LAB = "super-alpha"
 REPAIR_SAMPLER = "repair"
 #: Studies the Overfitting Guard writes: finalists re-run with small changes (agents.guard).
 GUARD_SAMPLER = "guard"
+#: Studies the Hypothesis Writer writes: an LLM's hypotheses, tested (agents.hypothesis).
+HYPOTHESIS_SAMPLER = "hypothesis"
 #: Studies that are research-lab tasks, run only from the Tasks tab, by their lab's name.
 TASK_SAMPLERS = {
     SEARCH_SAMPLER: "Search Lab",
@@ -53,6 +55,7 @@ TASK_SAMPLERS = {
     SUPER_LAB: "Super Alpha Lab",
     REPAIR_SAMPLER: "Repair Engineer",
     GUARD_SAMPLER: "Overfitting Guard",
+    HYPOTHESIS_SAMPLER: "Hypothesis Writer",
 }
 
 
@@ -201,6 +204,13 @@ class GuardParams(TaskParams):
     checks: list[str] = Field(default_factory=list)
 
 
+class HypothesisParams(TaskParams):
+    """Hypothesis Writer: each chosen hypothesis's expressions, every one written up front."""
+
+    #: Hypotheses the task tests, for the task's detail line.
+    hypotheses: int = 0
+
+
 BY_SAMPLER: dict[str, type[TaskParams]] = {
     SEARCH_SAMPLER: SearchParams,
     TEMPLATE_SAMPLER: TemplateParams,
@@ -212,6 +222,7 @@ BY_SAMPLER: dict[str, type[TaskParams]] = {
     SUPER_LAB: SuperParams,
     REPAIR_SAMPLER: RepairParams,
     GUARD_SAMPLER: GuardParams,
+    HYPOTHESIS_SAMPLER: HypothesisParams,
 }
 
 

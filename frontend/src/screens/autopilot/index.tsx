@@ -6,7 +6,14 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from '@tanstack/react-router'
-import { CompassIcon, RefreshCwIcon, ScaleIcon, WrenchIcon } from 'lucide-react'
+import {
+  CompassIcon,
+  FlaskConicalIcon,
+  LightbulbIcon,
+  RefreshCwIcon,
+  ScaleIcon,
+  WrenchIcon,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { errorMessage } from '@/api/http'
 import { cn } from '@/lib/cn'
@@ -17,6 +24,8 @@ import {
   AUTOPILOT_KEY,
   autopilot,
   type Gate,
+  HYPOTHESES_KEY,
+  type HypothesisEntry,
   type LabYield,
   type Niche,
   type PreScreen,
@@ -38,6 +47,7 @@ import {
   PageHeader,
   Panel,
   Skeleton,
+  Switch,
   TEXT_TONE,
   type Tone,
 } from '@/ui/kit'
@@ -110,6 +120,7 @@ export function AutopilotScreen() {
           </div>
           <YieldPanel yields={data.yields} />
           <StrategistPanel />
+          <HypothesesPanel />
           <RepairPanel />
           <ShortlistPanel entries={data.shortlist} />
         </>
@@ -243,6 +254,155 @@ function PreScreenPanel({ prescreen }: { prescreen: PreScreen }) {
         </p>
       </div>
     </Panel>
+  )
+}
+
+// ── Hypotheses ──────────────────────────────────────────────────────────────────────────
+
+function HypothesesPanel() {
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const query = useQuery({
+    queryKey: HYPOTHESES_KEY,
+    queryFn: autopilot.hypotheses,
+    refetchInterval: (q) => (q.state.data?.status === 'writing' ? 3000 : POLL_MS),
+  })
+  const refresh = () => void queryClient.invalidateQueries({ queryKey: HYPOTHESES_KEY })
+  const write = useMutation({
+    mutationFn: autopilot.writeHypotheses,
+    onSuccess: () => {
+      toast.success('Writing hypotheses', {
+        description: "Uses your LLM's budget, no simulation quota. Takes a minute or two.",
+      })
+      refresh()
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  })
+  const test = useMutation({
+    mutationFn: () => autopilot.testHypotheses(),
+    onSuccess: (added) => {
+      refresh()
+      void queryClient.invalidateQueries({ queryKey: ['lab-tasks'] })
+      toast.success(`Task added testing ${fmt.int(added.hypotheses)} hypotheses`, {
+        description: 'It is not started. Run it from Tasks.',
+        action: { label: 'Open Tasks', onClick: () => void navigate({ to: '/tasks' }) },
+      })
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  })
+  const data = query.data
+  const waiting = data?.hypotheses.filter((h) => h.enabled && h.simulations === 0).length ?? 0
+  const writing = data?.status === 'writing'
+
+  return (
+    <Panel
+      title="Hypotheses"
+      description="New ideas from your LLM, each with a reason, written for the pyramids the Strategist chose on datasets few others use. Switch off any you do not want tested."
+      actions={
+        <>
+          <Button loading={write.isPending || writing} onClick={() => write.mutate()}>
+            <LightbulbIcon />
+            {writing ? 'Writing…' : 'Write Hypotheses'}
+          </Button>
+          <Button
+            variant="primary"
+            loading={test.isPending}
+            disabled={!waiting}
+            onClick={() => test.mutate()}
+          >
+            <FlaskConicalIcon />
+            Test Selected{waiting ? ` (${waiting})` : ''}
+          </Button>
+        </>
+      }
+    >
+      {query.isError && !data ? (
+        <ErrorNotice error={query.error} title="Could not load the hypotheses" />
+      ) : !data ? (
+        <Skeleton className="h-32" label="Loading the hypotheses" />
+      ) : (
+        <div className="flex flex-col gap-3">
+          {data.note && (
+            <p
+              className={cn(
+                'text-body-compact text-pretty',
+                data.status === 'failed' ? TEXT_TONE.loss : 'text-ink-muted',
+              )}
+            >
+              {data.note}
+            </p>
+          )}
+          {data.hypotheses.length === 0 ? (
+            <p className="text-body-compact text-pretty text-ink-subtle">
+              None yet. Write Hypotheses asks your LLM for ideas on today's top pyramids; each
+              expression is checked against BRAIN's operators and your data, and dropped if it
+              repeats your pool, before it can cost a simulation.
+            </p>
+          ) : (
+            <ul className="flex flex-col divide-y divide-hairline">
+              {data.hypotheses.map((h) => (
+                <HypothesisRow key={h.id} entry={h} onChange={refresh} />
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </Panel>
+  )
+}
+
+function HypothesisRow({ entry, onChange }: { entry: HypothesisEntry; onChange: () => void }) {
+  const toggle = useMutation({
+    mutationFn: (enabled: boolean) => autopilot.toggleHypothesis(entry.id, enabled),
+    onSuccess: onChange,
+    onError: (error) => toast.error(errorMessage(error)),
+  })
+  const tested = entry.simulations > 0
+  return (
+    <li className={cn('flex gap-3 py-3', !entry.enabled && 'opacity-60')}>
+      <div className="pt-0.5">
+        <Switch
+          checked={entry.enabled}
+          disabled={tested || toggle.isPending}
+          onChange={(on) => toggle.mutate(on)}
+          aria-label={`Test ${entry.title}`}
+        />
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+          <span className="text-body font-medium text-ink">{entry.title}</span>
+          <span className="num text-caption text-ink-subtle">
+            {entry.region} · D{entry.delay} · {entry.category} · {entry.datasetId}
+          </span>
+        </div>
+        <p className="text-body-compact text-pretty text-ink-muted">{entry.rationale}</p>
+        <div className="flex flex-col gap-1">
+          {entry.expressions.map((e) => (
+            <code
+              key={e}
+              className="block overflow-x-auto rounded bg-surface-2 px-2 py-1 text-caption text-ink"
+            >
+              {e}
+            </code>
+          ))}
+        </div>
+        <p className="text-caption text-ink-subtle">
+          {tested ? (
+            <>
+              {fmt.int(entry.finished)} of {fmt.int(entry.simulations)} simulations back ·{' '}
+              <span className={entry.passed ? TEXT_TONE.profit : undefined}>
+                {fmt.int(entry.passed)} passed the Critic
+              </span>
+              {isNum(entry.bestSharpe) && <> · best Sharpe {fmt.ratio(entry.bestSharpe)}</>}
+            </>
+          ) : entry.enabled ? (
+            'Waiting to be tested.'
+          ) : (
+            'Switched off.'
+          )}
+        </p>
+      </div>
+    </li>
   )
 }
 

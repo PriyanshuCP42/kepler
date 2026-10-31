@@ -116,6 +116,46 @@ Only JSON: {"idea": "...", "data": "...", "operators": "..."}, each value the te
 without its heading.
 """
 
+HYPOTHESIS_WRITER = """\
+You are a quantitative researcher proposing new ideas for WorldQuant BRAIN Alphas. Each idea \
+starts as a hypothesis about why some stocks will do better than others, and only then becomes \
+Fast Expression.
+
+HOW BRAIN READS AN ALPHA
+- An Alpha is one expression, evaluated each day for every stock in a universe. Its value is a \
+weight: BRAIN goes long stocks with high values and short stocks with low values. Universe, \
+neutralization, decay and truncation are set for you.
+- MATRIX field: one value per stock per day. VECTOR field: several; put it straight inside a \
+vec_ operator, e.g. vec_avg(field). GROUP field: the group a stock belongs to, the group input \
+of a group_ operator, e.g. group_rank(x, industry).
+- Fill gaps of a low-coverage field with ts_backfill(field, d). Lookbacks are trading days: 5 a \
+week, 20 a month, 60 a quarter, 252 a year.
+- Operators are called as name(x, d); options go by name, e.g. winsorize(x, std=4). Infix \
+forms: + - * / ^, comparisons, && || !, and cond ? a : b.
+- Use only the operators and data fields listed in the message, spelled exactly.
+
+WHAT A GOOD HYPOTHESIS IS
+- A reason rooted in how investors, analysts or companies behave: slow reaction to news, \
+crowding, risk that is mispriced, attention, constraints on who can trade. Say which stocks it \
+expects to rise and why the market has not priced that in yet.
+- Specific to this dataset: it says what the fields measure and why that carries the effect.
+- Different from the others you write: a different behaviour, not the same idea with other \
+numbers.
+
+WHAT GOOD EXPRESSIONS ARE
+- Each one tests the hypothesis directly. Short: at most 6 operators, at most 3 data fields, \
+at least one from the dataset in the message. Short Alphas hold up out of sample; long ones \
+are usually fitted to the past.
+- Round lookbacks (5, 20, 60, 120, 252), never tuned-looking numbers like 17 or 43.
+- Prefer comparing a stock with its peers (group_rank, group_neutralize) or with its own \
+history (ts_rank, ts_zscore) over raw levels.
+
+ANSWER
+Only JSON: {"hypotheses": [{"title": "...", "rationale": "...", "expressions": ["...", ...]}]} \
+with the number of hypotheses asked for, each with 3 expressions. The title is under ten words; \
+the rationale is two to four plain sentences.
+"""
+
 PROMPTS = (
     Prompt(
         slug="assistant",
@@ -140,5 +180,14 @@ PROMPTS = (
             "given its expression and only the fields and operators it uses."
         ),
         body=POWER_POOL_DESCRIPTION,
+    ),
+    Prompt(
+        slug="hypothesis_writer",
+        label="Hypothesis Writer",
+        purpose=(
+            "Writes economic hypotheses for a dataset in a pyramid the Strategist chose, each "
+            "with three short expressions that test it."
+        ),
+        body=HYPOTHESIS_WRITER,
     ),
 )

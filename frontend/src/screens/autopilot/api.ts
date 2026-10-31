@@ -128,9 +128,38 @@ export interface StrategistTasks {
   skipped: { niche: string; reason: string }[]
 }
 
+export interface HypothesisEntry {
+  id: number
+  createdAt: string
+  region: string
+  delay: number
+  universe: string
+  category: string
+  datasetId: string
+  title: string
+  /** Why it should predict returns, in the model's words. */
+  rationale: string
+  expressions: string[]
+  model: string | null
+  /** Switched off: never simulated. */
+  enabled: boolean
+  /** 0 until it is in a task. */
+  simulations: number
+  finished: number
+  passed: number
+  bestSharpe: number | null
+}
+
+export interface HypothesesView {
+  status: 'idle' | 'writing' | 'failed'
+  note: string | null
+  hypotheses: HypothesisEntry[]
+}
+
 export const AUTOPILOT_KEY = ['autopilot'] as const
 export const STRATEGIST_KEY = ['autopilot', 'strategist'] as const
 export const REPAIR_KEY = ['autopilot', 'repair'] as const
+export const HYPOTHESES_KEY = ['autopilot', 'hypotheses'] as const
 
 export const autopilot = {
   get: () => http.get<Autopilot>('/api/autopilot'),
@@ -143,6 +172,16 @@ export const autopilot = {
   /** One Search Lab task per planned niche, not started. */
   writePlan: (niches = 5, simulations = 1500, cores = 4) =>
     http.post<StrategistTasks>('/api/agents/strategist/tasks', { niches, simulations, cores }),
+  hypotheses: () => http.get<HypothesesView>('/api/hypotheses'),
+  /** Asks the LLM for hypotheses in the background. 409 while it is already writing. */
+  writeHypotheses: () => http.post<{ started: boolean }>('/api/hypotheses/write', {}),
+  toggleHypothesis: (id: number, enabled: boolean) =>
+    http.patch<{ enabled: boolean }>(`/api/hypotheses/${id}`, { enabled }),
+  /** Every switched-on, untested hypothesis as one task in Tasks, not started. */
+  testHypotheses: (cores = 4) =>
+    http.post<{ id: number; name: string; hypotheses: number }>('/api/hypotheses/tasks', {
+      cores,
+    }),
   /** Writes fixes for the best near misses as one task in Tasks, not started. */
   planRepairs: (alphas = 100, perAlpha = 3, cores = 4) =>
     http.post<RepairTaskAdded>('/api/agents/repair/tasks', { alphas, perAlpha, cores }),
