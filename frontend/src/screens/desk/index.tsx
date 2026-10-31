@@ -9,6 +9,9 @@ import { Link, useNavigate } from '@tanstack/react-router'
 import {
   ChevronDownIcon,
   ChevronRightIcon,
+  EllipsisIcon,
+  ExternalLinkIcon,
+  InfoIcon,
   MicroscopeIcon,
   RefreshCwIcon,
   ShieldCheckIcon,
@@ -32,19 +35,19 @@ import {
   type YearSharpe,
 } from '@/screens/desk/api'
 import {
-  Badge,
   Button,
   Empty,
   ErrorNotice,
   LINK,
-  Metric,
   Page,
   PageHeader,
   Panel,
+  Segmented,
   Skeleton,
   TEXT_TONE,
   type Tone,
 } from '@/ui/kit'
+import { Menu, Tooltip } from '@/ui/overlay'
 
 const POLL_MS = 60_000
 const WHOLE = 'all'
@@ -128,7 +131,7 @@ export function DeskScreen() {
   const repairFailing = useMutation({
     mutationFn: () => desk.repairFailing(),
     onSuccess: (task) => {
-      toast.success(`Repairs written for ${task.alphas} alphas BRAIN refused`, {
+      toast.success(`Repairs written for ${task.alphas} fixable alphas`, {
         description: 'Aimed at the checks it refused. Run the task from Tasks.',
         action: { label: 'Open Tasks', onClick: () => void navigate({ to: '/tasks' }) },
       })
@@ -141,7 +144,7 @@ export function DeskScreen() {
       (c) =>
         c.submission?.status === 'not_run' && (c.readiness === 'ready' || c.readiness === 'check'),
     ).length ?? 0
-  const refused = data?.candidates.filter((c) => c.readiness === 'fails_check').length ?? 0
+  const fixable = data?.candidates.filter((c) => c.fix?.action === 'repair').length ?? 0
   const unguarded =
     data?.candidates.filter(
       (c) => c.guard.status === 'untested' && (c.readiness === 'ready' || c.readiness === 'check'),
@@ -156,48 +159,48 @@ export function DeskScreen() {
         actions={
           <>
             <Button
+              variant="primary"
               loading={submissionCheck.isPending}
               disabled={!unchecked}
               onClick={() => submissionCheck.mutate()}
-              title="Optional, as a last step: BRAIN's own Check Submission on each candidate, in the background, with no quota or LLM"
+              title="BRAIN's own Check Submission on each Ready or Check First candidate, in the background: no quota, no LLM"
             >
               <ShieldCheckIcon />
               Run Submission Check{unchecked ? ` (${unchecked})` : ''}
             </Button>
-            <Button
-              loading={repairFailing.isPending}
-              disabled={!refused}
-              onClick={() => repairFailing.mutate()}
-              title="Fixes aimed at the checks BRAIN refused"
-            >
-              <WrenchIcon />
-              Repair Failing{refused ? ` (${refused})` : ''}
-            </Button>
-            <Button
-              loading={check.isPending}
-              disabled={!missing}
-              onClick={() => check.mutate()}
-              title="Production Correlation is measured by BRAIN against every user's alphas"
-            >
-              <ShieldCheckIcon />
-              Check Production Correlation{missing ? ` (${missing})` : ''}
-            </Button>
-            <Button
-              loading={guard.isPending}
-              disabled={!unguarded}
-              onClick={() => guard.mutate()}
-              title="Re-simulates each candidate with small changes: a real signal survives them"
-            >
-              <MicroscopeIcon />
-              Run Neighbour Check{unguarded ? ` (${Math.min(unguarded, 20)})` : ''}
-            </Button>
-            <Button
-              loading={query.isFetching}
-              onClick={() => void queryClient.invalidateQueries({ queryKey: DESK_KEY })}
-            >
-              <RefreshCwIcon />
-              Refresh
-            </Button>
+            <Menu
+              trigger={
+                <Button aria-label="More actions">
+                  <EllipsisIcon />
+                  More
+                </Button>
+              }
+              items={[
+                {
+                  label: `Repair fixable alphas${fixable ? ` (${fixable})` : ''}`,
+                  icon: <WrenchIcon />,
+                  disabled: !fixable || repairFailing.isPending,
+                  onClick: () => repairFailing.mutate(),
+                },
+                {
+                  label: `Run neighbour check${unguarded ? ` (${Math.min(unguarded, 20)})` : ''}`,
+                  icon: <MicroscopeIcon />,
+                  disabled: !unguarded || guard.isPending,
+                  onClick: () => guard.mutate(),
+                },
+                {
+                  label: `Check production correlation${missing ? ` (${missing})` : ''}`,
+                  icon: <ShieldCheckIcon />,
+                  disabled: !missing || check.isPending,
+                  onClick: () => check.mutate(),
+                },
+                {
+                  label: 'Refresh',
+                  icon: <RefreshCwIcon />,
+                  onClick: () => void queryClient.invalidateQueries({ queryKey: DESK_KEY }),
+                },
+              ]}
+            />
           </>
         }
       />
@@ -208,53 +211,22 @@ export function DeskScreen() {
         <Skeleton className="h-96" label="Weighing candidates" />
       ) : (
         <>
-          <ReadyImpact
-            impact={data.readyImpact}
-            ready={data.readyIds}
-            span={`${data.recentFrom ?? 2021}–${data.recentTo ?? 2023}`}
-          />
-          <PoolYears years={data.poolYears} from={data.recentFrom} to={data.recentTo} />
-          <Summary candidates={data.candidates} submitted={data.submitted} />
+          <div className="grid gap-4 xl:grid-cols-[3fr_2fr]">
+            <ReadyImpact
+              impact={data.readyImpact}
+              ready={data.readyIds}
+              span={`${data.recentFrom ?? 2021}–${data.recentTo ?? 2023}`}
+            />
+            <PoolYears years={data.poolYears} from={data.recentFrom} to={data.recentTo} />
+          </div>
           <CandidatesPanel
             candidates={data.candidates}
             span={`${data.recentFrom ?? 2021}–${data.recentTo ?? 2023}`}
+            submitted={data.submitted}
           />
-          <p className="text-body-compact text-pretty text-ink-subtle">
-            Combined figures are worked out here from stored daily PnL, at equal weight over the
-            alphas trading each day, as BRAIN combines a pool; per partition this matches BRAIN's
-            own figure. Open an alpha for BRAIN's exact Performance Comparison, then submit it
-            there. Production Correlation above {fmt.ratio(data.prodCeiling, 1)} or correlation with
-            your pool above {fmt.ratio(data.selfCeiling, 1)} blocks it.
-          </p>
         </>
       )}
     </Page>
-  )
-}
-
-function Summary({ candidates, submitted }: { candidates: Candidate[]; submitted: number }) {
-  const count = (r: Readiness) => candidates.filter((c) => c.readiness === r).length
-  return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">
-      {(Object.keys(READINESS) as Readiness[]).map((r) => (
-        <Metric
-          key={r}
-          boxed
-          size="sm"
-          label={READINESS[r].label}
-          value={fmt.int(count(r))}
-          tone={count(r) && r !== 'hurts' ? READINESS[r].tone : 'neutral'}
-          hint={READINESS[r].note}
-        />
-      ))}
-      <Metric
-        boxed
-        size="sm"
-        label="Your Pool"
-        value={fmt.int(submitted)}
-        hint="Submitted alphas"
-      />
-    </div>
   )
 }
 
@@ -287,29 +259,33 @@ function ReadyImpact({
   const count = ready?.length ?? 0
   return (
     <Panel
-      title={count ? `If You Submit All ${count} Ready Alphas` : 'Your Genius Performance Bars'}
-      description={`How much better your pool's combined performance gets, measured on Sharpe, Fitness, margin (higher is better), turnover and drawdown (lower is better) together, over ${span}: the nearest years to the hidden ones BRAIN scores (from 2024). BRAIN's own figure differs and is the one that counts: check your Genius page a few weeks after submitting. Bars: ${GENIUS_BARS.map(([name, bar]) => `${name} ${bar}`).join(', ')}.`}
+      title={count ? `If You Submit All ${count} Ready` : 'Your Genius Performance Bars'}
+      actions={
+        <Tooltip
+          content={`Combined performance: Sharpe, Fitness and margin up, turnover and drawdown down, over ${span}, the nearest years to the hidden ones BRAIN scores (from 2024). BRAIN's own figure is the one that counts; the Genius Tracker compares the two. Bars: ${GENIUS_BARS.map(([name, bar]) => `${name} ${bar}`).join(', ')}.`}
+        >
+          <button
+            type="button"
+            className="text-ink-subtle hover:text-ink"
+            aria-label="How this is measured"
+          >
+            <InfoIcon className="size-4" />
+          </button>
+        </Tooltip>
+      }
     >
-      <div className="grid gap-3 lg:grid-cols-2">
+      <div className="grid gap-3 sm:grid-cols-2">
         {rows.map(([title, who, effect]) => (
-          <div key={title} className="rounded border border-hairline px-3 py-2.5">
-            <div className="text-body font-medium text-ink">{title}</div>
+          <div key={title} className="flex flex-col gap-1.5 rounded-sm bg-surface-1 px-3 py-2.5">
             <div className="text-caption text-ink-subtle">
-              {who} · {fmt.int(effect?.members ?? 0)} now
-              {count ? ` · ${ready?.join(', ')}` : ''}
+              {title} · {who}, {fmt.int(effect?.members ?? 0)}
             </div>
-            <div className="mt-2">
-              <Score effect={effect} />
-            </div>
-            <div className="mt-1">
-              <Parts impact={effect?.impact} />
-            </div>
-            <div className="mt-1 text-caption text-ink-subtle">
-              Sharpe over all years: <Change effect={effect} />
-            </div>
+            <Score effect={effect} />
+            <Parts impact={effect?.impact} />
           </div>
         ))}
       </div>
+      {count > 0 && <p className="mt-2 text-caption text-ink-subtle">{ready?.join(' · ')}</p>}
     </Panel>
   )
 }
@@ -330,17 +306,29 @@ function PoolYears({
   return (
     <Panel
       title="Your Pool, Year by Year"
-      description={`Combined Sharpe of your submitted alphas in each backtest year. BRAIN's Combined Alpha Performance is measured on the days after the backtest (from 2024), which BRAIN keeps hidden, so ${from}–${to} is the nearest Kepler can see: candidates are judged and ranked on it.`}
+      actions={
+        <Tooltip
+          content={`Combined Sharpe of your submitted alphas in each backtest year. BRAIN scores the hidden days after 2023, so ${from}–${to} (highlighted) is the nearest Kepler can see, and what candidates are judged on.`}
+        >
+          <button
+            type="button"
+            className="text-ink-subtle hover:text-ink"
+            aria-label="What this shows"
+          >
+            <InfoIcon className="size-4" />
+          </button>
+        </Tooltip>
+      }
     >
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-1.5">
         {years.map((y) => {
           const recent = y.year >= from && y.year <= to
           return (
             <div
               key={y.year}
               className={cn(
-                'flex min-w-16 flex-col items-center rounded border px-2 py-1',
-                recent ? 'border-hairline-strong bg-surface-2' : 'border-hairline',
+                'flex min-w-12 flex-col items-center rounded-sm px-1.5 py-1',
+                recent ? 'bg-surface-3' : 'bg-surface-1',
               )}
             >
               <span className="num text-caption text-ink-subtle">{y.year}</span>
@@ -350,11 +338,9 @@ function PoolYears({
         })}
       </div>
       {isNum(first?.sharpe) && isNum(last?.sharpe) && last.sharpe < first.sharpe && (
-        <p className="mt-3 text-body-compact text-pretty text-ink-muted">
-          Falling from {fmt.ratio(first.sharpe, 1)} in {first.year} to {fmt.ratio(last.sharpe, 1)}{' '}
-          in {last.year}: your alphas lose edge with time, which is how the combined figure turns
-          negative after submission. Only alphas still strong in every year of {from}–{to} reach
-          Ready.
+        <p className="mt-2 text-caption text-pretty text-ink-subtle">
+          Falling from {fmt.ratio(first.sharpe, 1)} to {fmt.ratio(last.sharpe, 1)}: only alphas
+          strong in every year of {from}–{to} reach Ready.
         </p>
       )}
     </Panel>
@@ -439,60 +425,90 @@ function Change({ effect, recent = false }: { effect: Effect | undefined; recent
   )
 }
 
-function CandidatesPanel({ candidates, span }: { candidates: Candidate[]; span: string }) {
+type View = 'worth' | 'ready' | 'refused' | 'aside' | 'all'
+
+const VIEWS: Record<View, { label: string; keep: (c: Candidate) => boolean }> = {
+  worth: {
+    label: 'Worth a look',
+    keep: (c) => ['ready', 'check', 'fails_check'].includes(c.readiness),
+  },
+  ready: { label: 'Ready', keep: (c) => c.readiness === 'ready' },
+  refused: { label: 'Fails Check', keep: (c) => c.readiness === 'fails_check' },
+  aside: {
+    label: 'Set aside',
+    keep: (c) => ['hurts', 'fading', 'overfit', 'blocked'].includes(c.readiness),
+  },
+  all: { label: 'All', keep: () => true },
+}
+
+function CandidatesPanel({
+  candidates,
+  span,
+  submitted,
+}: {
+  candidates: Candidate[]
+  span: string
+  submitted: number
+}) {
   const [open, setOpen] = useState<string | null>(null)
+  const [view, setView] = useState<View>('worth')
+  const shown = candidates.filter(VIEWS[view].keep)
   return (
     <Panel
       title="Candidates"
-      description="Critic passes that lead their family and are not submitted. Each impact is how much better your pool's combined performance gets: Sharpe, Fitness and margin up, turnover and drawdown down, over the recent years. Click a row for every figure."
-      bodyClassName={candidates.length ? 'p-0' : ''}
+      description={`Best first, against your ${fmt.int(submitted)} submitted alphas. Click a label for what to do, a row for every figure.`}
+      actions={
+        <Segmented
+          label="Show"
+          value={view}
+          onChange={setView}
+          items={(Object.keys(VIEWS) as View[]).map((v) => ({
+            value: v,
+            label: `${VIEWS[v].label} ${candidates.filter(VIEWS[v].keep).length}`,
+          }))}
+        />
+      }
+      bodyClassName={shown.length ? 'p-0' : ''}
     >
       {candidates.length === 0 ? (
         <Empty title="No candidates yet">
           Candidates appear as the Critic passes alphas and the Family Clerk places them in new
           families.
         </Empty>
+      ) : shown.length === 0 ? (
+        <Empty title={`Nothing in ${VIEWS[view].label}`}>Pick another view above.</Empty>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-body">
             <thead>
               <tr className="border-b border-hairline text-left text-caption uppercase tracking-wide text-ink-subtle">
-                <th className="px-4 py-2 font-medium">Alpha</th>
-                <th className="px-4 py-2 font-medium">Verdict</th>
-                <th className="px-4 py-2 font-medium">Market</th>
-                <th className="px-4 py-2 text-right font-medium">Test Sharpe</th>
-                <th className="px-4 py-2 text-right font-medium">Pool Corr</th>
-                <th className="px-4 py-2 text-right font-medium">Prod Corr</th>
-                <th className="px-4 py-2 font-medium">BRAIN Check</th>
-                <th className="px-4 py-2 font-medium">Neighbours</th>
-                <th
-                  className="px-4 py-2 font-medium"
-                  title="Your whole pool's combined Sharpe, before and after"
-                >
-                  Combined Alpha Perf. {span}
-                </th>
-                <th
-                  className="px-4 py-2 font-medium"
-                  title="Your Power Pool alphas' combined Sharpe, before and after"
-                >
-                  Combined Power Pool {span}
-                </th>
-                <th className="px-4 py-2 font-medium">Partition {span}</th>
-                <th className="px-4 py-2 font-medium">Pyramid</th>
+                <th className="px-4 py-2.5 font-medium">Alpha</th>
+                <th className="px-4 py-2.5 font-medium">Verdict</th>
+                <th className="px-4 py-2.5 font-medium">Market</th>
+                <th className="px-4 py-2.5 font-medium">Your pool {span}</th>
+                <th className="px-4 py-2.5 font-medium">Power Pool</th>
+                <th className="px-4 py-2.5 font-medium">Checks</th>
+                <th className="px-4 py-2.5 font-medium">Pyramid</th>
               </tr>
             </thead>
             <tbody>
-              {candidates.map((c) => {
+              {shown.map((c) => {
                 const expanded = open === c.alphaId
-                const partition = effectOf(c, false)
-                const verdict = READINESS[c.readiness]
                 return (
                   <Fragment key={c.alphaId}>
                     <tr
-                      className="cursor-pointer border-b border-hairline-subtle hover:bg-surface-2"
-                      onClick={() => setOpen(expanded ? null : c.alphaId)}
+                      className={cn(
+                        'cursor-pointer border-b border-hairline-subtle transition-colors hover:bg-surface-2',
+                        expanded && 'bg-surface-1',
+                      )}
+                      onClick={(e) => {
+                        // A label's menu, rendered elsewhere, still bubbles its clicks here.
+                        if ((e.target as HTMLElement).closest('button, a, [role="menuitem"]'))
+                          return
+                        setOpen(expanded ? null : c.alphaId)
+                      }}
                     >
-                      <td className="px-4 py-2">
+                      <td className="px-4 py-3">
                         <span className="flex items-center gap-1.5">
                           {expanded ? (
                             <ChevronDownIcon className="size-3.5 text-ink-subtle" aria-hidden />
@@ -508,70 +524,58 @@ function CandidatesPanel({ candidates, span }: { candidates: Candidate[]; span: 
                             {c.alphaId}
                           </Link>
                         </span>
-                      </td>
-                      <td className="px-4 py-2" title={c.reasons.join(' ')}>
-                        <Badge tone={verdict.tone}>{verdict.label}</Badge>
-                      </td>
-                      <td className="num px-4 py-2 text-ink-muted">
-                        {[c.region, isNum(c.delay) ? `D${c.delay}` : null, c.universe]
-                          .filter(Boolean)
-                          .join(' · ') || DASH}
-                        {c.powerPool && <span className="ml-1.5 text-caption">PP</span>}
-                      </td>
-                      <td className="num px-4 py-2 text-right text-ink">
-                        {fmt.ratio(c.testSharpe)}
-                      </td>
-                      <td className="num px-4 py-2 text-right text-ink-muted">
-                        {fmt.ratio(c.poolCorrelation)}
-                      </td>
-                      <td
-                        className={cn(
-                          'num px-4 py-2 text-right',
-                          TEXT_TONE[
-                            !isNum(c.prodCorrelation)
-                              ? 'muted'
-                              : c.readiness === 'blocked'
-                                ? 'loss'
-                                : 'neutral'
-                          ],
-                        )}
-                      >
-                        {isNum(c.prodCorrelation) ? fmt.ratio(c.prodCorrelation) : 'not checked'}
-                      </td>
-                      <td className="px-4 py-2">
-                        <SubmissionBadge submission={c.submission} />
-                      </td>
-                      <td className="px-4 py-2">
-                        <GuardBadge guard={c.guard} />
-                      </td>
-                      <td className="px-4 py-2">
-                        <Score effect={effectOf(c, true)} />
-                      </td>
-                      <td className="px-4 py-2">
-                        {c.powerPool ? (
-                          <Score effect={c.effects.find((e) => e.scope === POWER)} />
-                        ) : (
-                          <span className="text-caption text-ink-subtle">not Power Pool</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-2">
-                        <Score effect={partition} />
-                        {partition && (
-                          <div className="text-caption text-ink-subtle">
-                            {partition.scope} · {fmt.int(partition.members)} alphas
+                        {c.repairOf && (
+                          <div className="ml-5 text-caption text-ink-subtle">
+                            repair of {c.repairOf.origin} · {c.repairOf.name}
                           </div>
                         )}
                       </td>
-                      <td className="px-4 py-2">
+                      <td className="px-4 py-3">
+                        <VerdictChip candidate={c} onDetails={() => setOpen(c.alphaId)} />
+                      </td>
+                      <td className="num px-4 py-3 text-ink-muted">
+                        {[c.region, isNum(c.delay) ? `D${c.delay}` : null]
+                          .filter(Boolean)
+                          .join(' · ')}
+                        <div className="text-caption text-ink-subtle">
+                          {c.universe}
+                          {c.powerPool && ' · PP'}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <Score effect={effectOf(c, true)} />
+                      </td>
+                      <td className="px-4 py-3">
+                        {c.powerPool ? (
+                          <Score effect={c.effects.find((e) => e.scope === POWER)} />
+                        ) : (
+                          <span className="text-caption text-ink-subtle">{DASH}</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-col gap-0.5 text-body-compact">
+                          <span>
+                            <span className="text-caption text-ink-subtle">BRAIN </span>
+                            <SubmissionBadge submission={c.submission} />
+                          </span>
+                          <span>
+                            <span className="text-caption text-ink-subtle">Neighbours </span>
+                            <GuardBadge guard={c.guard} />
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
                         {c.pyramid ? (
                           <span className="whitespace-nowrap">
-                            <span className="num text-ink-muted">{c.pyramid.name}</span>{' '}
-                            <span className="num text-ink-subtle">{c.pyramid.submitted}/3</span>
-                            {c.pyramid.completes && (
-                              <Badge tone="profit" className="ml-1.5">
-                                Completes
-                              </Badge>
-                            )}
+                            <span className="num text-body-compact text-ink-muted">
+                              {c.pyramid.name}
+                            </span>
+                            <div className="text-caption text-ink-subtle">
+                              {c.pyramid.submitted}/3
+                              {c.pyramid.completes && (
+                                <span className={TEXT_TONE.profit}> · completes it</span>
+                              )}
+                            </div>
                           </span>
                         ) : (
                           <span className="text-ink-subtle">{DASH}</span>
@@ -580,7 +584,7 @@ function CandidatesPanel({ candidates, span }: { candidates: Candidate[]; span: 
                     </tr>
                     {expanded && (
                       <tr className="border-b border-hairline-subtle bg-surface-1">
-                        <td colSpan={12} className="px-4 py-3">
+                        <td colSpan={7} className="px-6 py-4">
                           <Details candidate={c} />
                         </td>
                       </tr>
@@ -593,6 +597,74 @@ function CandidatesPanel({ candidates, span }: { candidates: Candidate[]; span: 
         </div>
       )}
     </Panel>
+  )
+}
+
+const FIX_LABELS: Record<NonNullable<Candidate['fix']>['action'], { label: string; tone: Tone }> = {
+  describe: { label: 'Add description', tone: 'warn' },
+  repair: { label: 'Repair', tone: 'warn' },
+  drop: { label: 'Drop', tone: 'loss' },
+  repaired: { label: 'Repaired', tone: 'muted' },
+}
+
+/** The verdict, or for a refused alpha what to do about it: hover for why, click to act. */
+function VerdictChip({ candidate, onDetails }: { candidate: Candidate; onDetails: () => void }) {
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const repair = useMutation({
+    mutationFn: () => desk.repairOne(candidate.alphaId),
+    onSuccess: () => {
+      toast.success(`One repair round written for ${candidate.alphaId}`, {
+        description: 'Up to 3 fixes, each judged again from scratch. Run it from Tasks.',
+        action: { label: 'Open Tasks', onClick: () => void navigate({ to: '/tasks' }) },
+      })
+      void queryClient.invalidateQueries({ queryKey: DESK_KEY })
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  })
+  const fix = candidate.readiness === 'fails_check' ? candidate.fix : null
+  const shown = fix ? FIX_LABELS[fix.action] : READINESS[candidate.readiness]
+  const why = fix?.reason ?? candidate.reasons[0] ?? READINESS[candidate.readiness].note
+  const open = () =>
+    void navigate({ to: '/alpha/$alphaId', params: { alphaId: candidate.alphaId } })
+  return (
+    <Tooltip content={why}>
+      <span className="inline-flex">
+        <Menu
+          align="start"
+          trigger={
+            <button
+              type="button"
+              className={cn(
+                'inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-pill border border-hairline-strong px-2.5 text-body-compact font-medium transition-colors hover:bg-surface-3',
+                TEXT_TONE[shown.tone],
+              )}
+            >
+              {shown.label}
+              <ChevronDownIcon className="size-3 opacity-70" aria-hidden />
+            </button>
+          }
+          items={[
+            ...(fix?.action === 'repair'
+              ? [
+                  {
+                    label: 'Repair this alpha (one round)',
+                    icon: <WrenchIcon />,
+                    disabled: repair.isPending,
+                    onClick: () => repair.mutate(),
+                  },
+                ]
+              : []),
+            {
+              label: fix?.action === 'describe' ? 'Add its description' : 'Open its Alpha page',
+              icon: <ExternalLinkIcon />,
+              onClick: open,
+            },
+            { label: 'Show every figure', icon: <ChevronDownIcon />, onClick: onDetails },
+          ]}
+        />
+      </span>
+    </Tooltip>
   )
 }
 
@@ -786,8 +858,41 @@ const ROWS: { key: keyof Figures; label: string; show: (v: number | null) => str
 ]
 
 function Details({ candidate }: { candidate: Candidate }) {
+  const partition = effectOf(candidate, false)
   return (
     <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap gap-x-6 gap-y-1 text-body-compact">
+        {(
+          [
+            ['Test Sharpe', fmt.ratio(candidate.testSharpe)],
+            ['Pool correlation', fmt.ratio(candidate.poolCorrelation)],
+            [
+              'Production correlation',
+              isNum(candidate.prodCorrelation)
+                ? fmt.ratio(candidate.prodCorrelation)
+                : 'not checked',
+            ],
+            ['Critic score', fmt.ratio(candidate.criticScore, 1)],
+            [
+              partition ? `Partition ${partition.scope}` : 'Partition',
+              partition?.impact ? percent(partition.impact.total) : DASH,
+            ],
+          ] as const
+        ).map(([label, value]) => (
+          <span key={label}>
+            <span className="text-ink-subtle">{label} </span>
+            <span className="num text-ink">{value}</span>
+          </span>
+        ))}
+      </div>
+      {candidate.fix && (
+        <p className="text-body-compact text-pretty text-ink">
+          <span className={cn('font-medium', TEXT_TONE[FIX_LABELS[candidate.fix.action].tone])}>
+            {FIX_LABELS[candidate.fix.action].label}:
+          </span>{' '}
+          {candidate.fix.reason}
+        </p>
+      )}
       <ul className="flex flex-col gap-0.5 text-body-compact text-ink-muted">
         {candidate.reasons.map((r) => (
           <li key={r}>{r}</li>

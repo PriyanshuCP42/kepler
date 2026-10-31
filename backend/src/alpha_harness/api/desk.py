@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 
 from ..agents import guard
+from ..agents.repair import BY_ID as REPAIR_MOVES
 from ..brain.platform import (
     IGNORED_CHECKS,
     POWER_POOL_CLASS,
@@ -32,7 +33,7 @@ from ..brain.platform import (
     PYRAMID_MIN_ALPHAS,
     SELF_CORRELATION_CEILING,
 )
-from ..db.models import BrainCache, CriticVerdict
+from ..db.models import BrainCache, CriticVerdict, RepairAttempt
 from ..labs.fastexpr import ParseError, data_fields, parse
 from ..schemas import Out
 from ..tools import portfolio, power_pool
@@ -172,6 +173,27 @@ class SubmissionCheck(Out):
     needs_description: bool
 
 
+Action = Literal["describe", "repair", "drop", "repaired"]
+
+
+class Fix(Out):
+    """What to do about a candidate BRAIN's submission check refused, decided by rule so an
+    alpha is never tuned until it happens to pass: see :func:`fix_for`."""
+
+    action: Action
+    reason: str
+    #: The refused checks the action answers.
+    checks: list[str]
+
+
+class Lineage(Out):
+    """The near miss or refused alpha this one repairs, and the fix that made it."""
+
+    origin: str
+    move: str
+    name: str
+
+
 class Candidate(Out):
     alpha_id: str
     region: str | None
@@ -191,6 +213,8 @@ class Candidate(Out):
     effects: list[Effect]
     guard: GuardView
     submission: SubmissionCheck | None = None
+    fix: Fix | None = None
+    repair_of: Lineage | None = None
     pyramid: Pyramid | None
     readiness: Readiness
     reasons: list[str]
@@ -322,6 +346,74 @@ def _check_text(c: CheckLine) -> str:
     if c.value is None or c.limit is None:
         return c.name
     return f"{c.name} {c.value:g} against {c.limit:g}"
+
+
+#: Refusals one change can answer honestly: they are about how the alpha trades, not whether
+#: its signal is strong enough.
+MECHANICAL = frozenset({"CONCENTRATED_WEIGHT", "HIGH_TURNOVER", "LOW_TURNOVER"})
+#: How far short of its limit a strength check (Sharpe, Fitness) may be and still be repaired.
+#: Further than this, a repair is a search for settings that happen to clear the bar.
+NEAR_FIX = 0.10
+
+
+def _shortfall(line: CheckLine) -> float | None:
+    """How far a refused check missed its limit, as a share of the limit."""
+    if line.value is None or line.limit is None or line.limit == 0:
+        return None
+    return abs(line.limit - line.value) / abs(line.limit)
+
+
+def fix_for(submission: SubmissionCheck | None, power_pool: bool, repaired: bool) -> Fix | None:
+    """Describe, repair, drop, or already repaired: one rule per refused check.
+
+    A mechanical refusal (concentration, turnover) is repaired. A strength refusal (Sharpe,
+    Fitness) within :data:`NEAR_FIX` of its limit is repaired too. Further short, a Power
+    Pool alpha without its description may still be taken through the Power Pool route, so
+    it is told to add one; any other is dropped. An alpha gets one repair round, so one
+    already repaired is not repaired again: its fixes stand or fall on their own.
+    """
+    if submission is None or submission.status != "fails":
+        return None
+    if repaired:
+        return Fix(
+            action="repaired",
+            reason="Repaired once already: its fixes are judged as new alphas. No second round, "
+            "so it is never tuned until it passes.",
+            checks=[c.name for c in submission.failing],
+        )
+    repairable, describable, hopeless = [], [], []
+    for line in submission.failing:
+        short = _shortfall(line)
+        if line.name in MECHANICAL or (short is not None and short <= NEAR_FIX):
+            repairable.append(line)
+        elif power_pool and submission.needs_description:
+            describable.append(line)
+        else:
+            hopeless.append(line)
+    if hopeless:
+        worst = ", ".join(_check_text(c) for c in hopeless)
+        return Fix(
+            action="drop",
+            reason=f"Not fixable without overfitting: {worst} is more than "
+            f"{NEAR_FIX:.0%} short, and forcing it over the bar would fit noise.",
+            checks=[c.name for c in hopeless],
+        )
+    if describable:
+        then = f" Then repair {', '.join(c.name for c in repairable)}." if repairable else ""
+        return Fix(
+            action="describe",
+            reason="BRAIN takes an alpha under these limits only as Power Pool, with a "
+            "description of 100 characters or more: add one on its Alpha page and check "
+            f"again.{then}",
+            checks=[c.name for c in describable],
+        )
+    return Fix(
+        action="repair",
+        reason="Fixable with one change each: "
+        + ", ".join(_check_text(c) for c in repairable)
+        + ". One round of up to 3 fixes; each must pass every test again.",
+        checks=[c.name for c in repairable],
+    )
 
 
 def judge(
@@ -495,6 +587,20 @@ async def desk(state: State) -> Desk:
     rows = {v.alpha_id: stored[v.alpha_id] for v in chosen}
     verdicts_of = await state.guard.verdicts(rows)
     siblings = await state.guard.siblings(rows)
+    async with state.db.session() as session:
+        attempts = list(
+            await session.scalars(
+                select(RepairAttempt).where(
+                    RepairAttempt.origin_alpha_id.in_(list(rows))
+                    | RepairAttempt.alpha_id.in_(list(rows))
+                )
+            )
+        )
+    repaired_origins = {a.origin_alpha_id for a in attempts}
+    lineage = {a.alpha_id: a for a in attempts if a.alpha_id}
+    tries: dict[str, int] = {}
+    for a in attempts:
+        tries[a.origin_alpha_id] = tries.get(a.origin_alpha_id, 0) + 1
 
     checks = {v.alpha_id: checks_of(stored[v.alpha_id].get("checks")) for v in chosen}
     async with state.db.session() as session:
@@ -507,6 +613,7 @@ async def desk(state: State) -> Desk:
     prod = await prod_correlations(state, list(checks), checks)
     categories, niches = await _pyramids(state)
 
+    repair_moves = {key: move.name for key, move in REPAIR_MOVES.items()}
     out: list[Candidate] = []
     for v in chosen:
         row = stored[v.alpha_id]
@@ -533,9 +640,12 @@ async def desk(state: State) -> Desk:
                 completes=submitted + 1 == PYRAMID_MIN_ALPHAS,
                 multiplier=niche.multiplier if niche else None,
             )
-        view = _guard_view(
-            verdicts_of[v.alpha_id], siblings.get(v.alpha_id, 1), series.get(v.alpha_id), row
+        parent = lineage.get(v.alpha_id)
+        # Every fix tried on an idea is another variant of it, so the luck bar rises with them.
+        variants = siblings.get(v.alpha_id, 1) + (
+            tries.get(parent.origin_alpha_id, 0) if parent else 0
         )
+        view = _guard_view(verdicts_of[v.alpha_id], variants, series.get(v.alpha_id), row)
         held = kept.get(v.alpha_id)
         submission = submission_of(
             held.body if held else None, held.fetched_at if held else None, checks[v.alpha_id]
@@ -566,6 +676,14 @@ async def desk(state: State) -> Desk:
                 effects=found,
                 guard=view,
                 submission=submission,
+                fix=fix_for(submission, powered[v.alpha_id], v.alpha_id in repaired_origins),
+                repair_of=Lineage(
+                    origin=parent.origin_alpha_id,
+                    move=parent.move,
+                    name=repair_moves.get(parent.move, parent.move),
+                )
+                if parent
+                else None,
                 pyramid=pyramid,
                 readiness=readiness,
                 reasons=reasons,
@@ -771,8 +889,23 @@ async def repair_failing(body: RepairFailing, state: State) -> RepairWritten:
     """Write repairs for the candidates BRAIN's submission check refused, aimed at the checks
     it refused, as one task in Tasks, not started."""
     found = await desk(state)
-    ids = [c.alpha_id for c in found.candidates if c.readiness == "fails_check"]
-    added = await state.repair.add_task(len(ids), 3, body.cores, ids) if ids else None
+    ids = [c.alpha_id for c in found.candidates if c.fix is not None and c.fix.action == "repair"]
+    return await _repair(state, ids, body.cores)
+
+
+@router.post("/repair/{alpha_id}", status_code=201)
+async def repair_one(alpha_id: str, body: RepairFailing, state: State) -> RepairWritten:
+    """Write one repair round for this candidate alone, when the rules call it fixable."""
+    found = await desk(state)
+    match = next((c for c in found.candidates if c.alpha_id == alpha_id), None)
+    if match is None or match.fix is None or match.fix.action != "repair":
+        reason = match.fix.reason if match and match.fix else "It is not refused as fixable."
+        raise refuse(409, "not_repairable", reason)
+    return await _repair(state, [alpha_id], body.cores)
+
+
+async def _repair(state: Any, ids: list[str], cores: int) -> RepairWritten:
+    added = await state.repair.add_task(len(ids), 3, cores, ids) if ids else None
     if added is None:
-        raise refuse(409, "nothing_to_repair", "No candidate fails BRAIN's submission check.")
+        raise refuse(409, "nothing_to_repair", "No candidate is refused as fixable.")
     return RepairWritten(id=added.id, name=added.name, alphas=len(ids))

@@ -1043,6 +1043,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/desk/repair/{alpha_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Repair One
+         * @description Write one repair round for this candidate alone, when the rules call it fixable.
+         */
+        post: operations["repair_one_api_desk_repair__alpha_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/desk/submission-check": {
         parameters: {
             query?: never;
@@ -3300,6 +3320,7 @@ export interface components {
             expression: string | null;
             /** Fitness */
             fitness: number | null;
+            fix?: components["schemas"]["Fix"] | null;
             guard: components["schemas"]["GuardView"];
             /** Poolcorrelation */
             poolCorrelation: number | null;
@@ -3317,6 +3338,7 @@ export interface components {
             reasons: string[];
             /** Region */
             region: string | null;
+            repairOf?: components["schemas"]["Lineage"] | null;
             /** Sharpe */
             sharpe: number | null;
             submission?: components["schemas"]["SubmissionCheck"] | null;
@@ -4068,6 +4090,22 @@ export interface components {
             /** Turnover */
             turnover: number;
         };
+        /**
+         * Fix
+         * @description What to do about a candidate BRAIN's submission check refused, decided by rule so an
+         *     alpha is never tuned until it happens to pass: see :func:`fix_for`.
+         */
+        Fix: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "describe" | "repair" | "drop" | "repaired";
+            /** Checks */
+            checks: string[];
+            /** Reason */
+            reason: string;
+        };
         /** GeniusAgreement */
         GeniusAgreement: {
             /** Correlation */
@@ -4613,6 +4651,18 @@ export interface components {
         LeftOut: {
             /** Vector */
             vector: number;
+        };
+        /**
+         * Lineage
+         * @description The near miss or refused alpha this one repairs, and the fix that made it.
+         */
+        Lineage: {
+            /** Move */
+            move: string;
+            /** Name */
+            name: string;
+            /** Origin */
+            origin: string;
         };
         /**
          * LoginRequest
@@ -8442,6 +8492,41 @@ export interface operations {
             query?: never;
             header?: never;
             path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RepairFailing"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RepairWritten"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    repair_one_api_desk_repair__alpha_id__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                alpha_id: string;
+            };
             cookie?: never;
         };
         requestBody: {

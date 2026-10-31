@@ -101,6 +101,20 @@ export interface GuardView {
   fullSharpe: number | null
 }
 
+/** What to do about a candidate BRAIN's submission check refused, decided by rule. */
+export interface Fix {
+  action: 'describe' | 'repair' | 'drop' | 'repaired'
+  reason: string
+  checks: string[]
+}
+
+/** The alpha this one repairs, and the fix that made it. */
+export interface Lineage {
+  origin: string
+  move: string
+  name: string
+}
+
 export interface Candidate {
   alphaId: string
   region: string | null
@@ -120,6 +134,8 @@ export interface Candidate {
   guard: GuardView
   /** Absent from a backend older than this screen. */
   submission?: SubmissionCheck | null
+  fix?: Fix | null
+  repairOf?: Lineage | null
   pyramid: Pyramid | null
   readiness: Readiness
   reasons: string[]
@@ -149,6 +165,12 @@ export const desk = {
   checkProd: () => http.post<{ taskId: string }>('/api/desk/prod-correlation'),
   /** Runs BRAIN's submission check on every Ready or Check First candidate not checked yet. */
   submissionCheck: () => http.post<{ taskId: string }>('/api/desk/submission-check'),
+  /** One repair round for this candidate alone, when the rules call it fixable. */
+  repairOne: (alphaId: string, cores = 4) =>
+    http.post<{ id: number; name: string; alphas: number }>(
+      `/api/desk/repair/${encodeURIComponent(alphaId)}`,
+      { cores },
+    ),
   /** Writes repairs for the candidates BRAIN's submission check refused. */
   repairFailing: (cores = 4) =>
     http.post<{ id: number; name: string; alphas: number }>('/api/desk/repair', { cores }),

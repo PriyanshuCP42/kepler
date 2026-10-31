@@ -185,3 +185,63 @@ class TestSubmissionCheck:
         readiness, reasons = judge(0.3, 0.2, [], None, 1.5, unchecked)
         assert readiness == "ready"
         assert not any("Check Submission" in r for r in reasons)
+
+
+class TestFixRule:
+    def _refused(self, *lines: dict, describe: bool = False):
+        from datetime import UTC, datetime
+
+        from alpha_harness.api.desk import submission_of
+
+        checks = list(lines) + ([NO_DESCRIPTION] if describe else [])
+        return submission_of(_kept(*checks), datetime(2026, 10, 31, tzinfo=UTC), [])
+
+    def test_mechanical_refusals_are_repaired(self):
+        from alpha_harness.api.desk import fix_for
+
+        concentrated = {
+            "name": "CONCENTRATED_WEIGHT",
+            "result": "FAIL",
+            "value": 0.17,
+            "limit": 0.1,
+        }
+        found = fix_for(self._refused(concentrated), power_pool=False, repaired=False)
+        assert found is not None and found.action == "repair"
+
+    def test_a_near_strength_miss_is_repaired(self):
+        from alpha_harness.api.desk import fix_for
+
+        near = {"name": "LOW_2Y_SHARPE", "result": "FAIL", "value": 2.65, "limit": 2.69}
+        found = fix_for(self._refused(near), power_pool=False, repaired=False)
+        assert found is not None and found.action == "repair"
+
+    def test_a_far_strength_miss_is_dropped(self):
+        from alpha_harness.api.desk import fix_for
+
+        found = fix_for(self._refused(LOW_SHARPE_FAIL), power_pool=False, repaired=False)
+        assert found is not None and found.action == "drop"
+        assert "overfitting" in found.reason
+
+    def test_a_power_pool_alpha_without_description_is_told_to_add_one(self):
+        from alpha_harness.api.desk import fix_for
+
+        refused = self._refused(LOW_SHARPE_FAIL, describe=True)
+        found = fix_for(refused, power_pool=True, repaired=False)
+        assert found is not None and found.action == "describe"
+
+    def test_one_repair_round_only(self):
+        from alpha_harness.api.desk import fix_for
+
+        concentrated = {
+            "name": "CONCENTRATED_WEIGHT",
+            "result": "FAIL",
+            "value": 0.17,
+            "limit": 0.1,
+        }
+        found = fix_for(self._refused(concentrated), power_pool=False, repaired=True)
+        assert found is not None and found.action == "repaired"
+
+    def test_nothing_refused_needs_no_fix(self):
+        from alpha_harness.api.desk import fix_for, submission_of
+
+        assert fix_for(submission_of(None, None, []), power_pool=True, repaired=False) is None
