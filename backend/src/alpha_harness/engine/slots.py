@@ -65,6 +65,10 @@ log = structlog.get_logger(__name__)
 #: Added to a batched simulation's outcome when BRAIN named no child, so it was matched by order.
 POSITIONAL_NOTE = "Matched to this request by submission order."
 
+#: A batch BRAIN ends ERROR with every child FAIL, no alpha and no reason, is BRAIN's own
+#: hiccup: the same expressions simulate alone. Its simulations are queued again this often.
+BLANK_BATCH_RETRIES = 1
+
 #: How often the engine looks for work.
 TICK_SECONDS = 2.0
 
@@ -1010,6 +1014,27 @@ class BatchEngine:
                 )
                 await self.tracker.notify()
             return
+
+        if str(parent.platform_status or "").upper() == "ERROR" and all(
+            outcomes[c].alpha_id is None and not outcomes[c].message for c in child_ids
+        ):
+            retry = [r.id for r in open_rows if r.orphan_requeues < BLANK_BATCH_RETRIES]
+            async with self.db.session() as session:
+                requeued = await transition(
+                    session,
+                    retry,
+                    from_=[SimStatus.RUNNING],
+                    status=SimStatus.QUEUED,
+                    parent_record_id=None,
+                    platform_id=None,
+                    sent_at=None,
+                    finished_at=None,
+                    progress=None,
+                    orphan_requeues=SimulationRecord.orphan_requeues + 1,
+                    message="BRAIN failed its whole batch without a reason; queued again.",
+                )
+            open_rows = [r for r in open_rows if r.id not in requeued]
+            log.info("engine.blank_batch_requeued", parent=parent.id, requeued=len(requeued))
 
         await self._finish_children(open_rows, resolved, outcomes)
         async with self.db.session() as session:
