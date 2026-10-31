@@ -20,6 +20,7 @@ limits, so each recipe is counted the way Power Pool counts and says when it wou
 """
 
 import asyncio
+import itertools
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -33,7 +34,16 @@ from ..brain.platform import (
 )
 from ..brain.schemas import FULL_MODE, SimulationRequest, SimulationSettings
 from ..catalog.queries import FieldFilter, Tuple4
-from ..labs.fastexpr import Node, ParseError, data_fields, operator_count, parse, render
+from ..labs.fastexpr import (
+    Node,
+    ParseError,
+    data_fields,
+    operator_count,
+    parse,
+    relabel,
+    render,
+    walk,
+)
 from ..labs.launch import OPERATORS_UNREAD, account_operators
 from ..vault.yields import is_power_pool
 
@@ -95,6 +105,13 @@ def compress(expression: str) -> Compressed:
         raise ParseError("The expression is empty.")
 
     last = statements[-1]
+    if not (last.kind == "assign" and last.value == ALPHA) and any(
+        s.kind == "assign" and s.value == ALPHA for s in statements
+    ):
+        # Binding ``alpha`` again would redefine it, which BRAIN refuses: the reader's own
+        # ``alpha`` takes a name nothing else uses.
+        statements = _renamed(statements, ALPHA)
+        last = statements[-1]
     if last.kind == "assign":
         # The program's value is whatever it last assigned; keep every statement as written.
         prelude = tuple(render(s) for s in statements)
@@ -103,6 +120,23 @@ def compress(expression: str) -> Compressed:
 
     prelude = tuple(render(s) for s in statements[:-1])
     return Compressed(prelude=prelude, binding=f"{ALPHA} = {render(last)}")
+
+
+def _renamed(statements: tuple[Node, ...], name: str) -> tuple[Node, ...]:
+    """``statements`` with every use and assignment of ``name`` under a fresh name."""
+    taken = {n.value for s in statements for _, n in walk(s) if n.kind in ("name", "assign")}
+    fresh = next(f"{name}_{i}" for i in itertools.count() if f"{name}_{i}" not in taken)
+    return tuple(
+        relabel(
+            s,
+            {
+                path: fresh
+                for path, n in walk(s)
+                if n.kind in ("name", "assign") and n.value == name
+            },
+        )
+        for s in statements
+    )
 
 
 @dataclass(frozen=True, slots=True)

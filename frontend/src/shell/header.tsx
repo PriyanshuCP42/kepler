@@ -238,6 +238,11 @@ function Clocks() {
     queryFn: () => today.bar(),
     refetchInterval: 30_000,
   })
+  // Shared with the core tiles: BRAIN's refusal, not its quota headers, says the day is spent.
+  const engine = useQuery({
+    queryKey: ['simulations', 'engine'],
+    queryFn: () => simulations.engine(),
+  })
   useRefetchOn('simulations', ['bar'], 3000)
   useRefetchOn('session', ['bar'])
   // Seconds since the last fetch, so the countdowns tick between polls.
@@ -248,6 +253,9 @@ function Clocks() {
     bar.data.expiresInSeconds == null ? null : Math.max(0, bar.data.expiresInSeconds - elapsed)
   // `exact` flips true once today's first simulation POST returns BRAIN's own quota headers.
   const { remaining, exact } = bar.data.simulations
+  // BRAIN's header counts requests, so it can show thousands left after BRAIN has refused
+  // any more simulations today.
+  const limitHit = Boolean(engine.data?.dailyLimitHit)
 
   return (
     // Below 1024px the two clocks hide; below 640px the quota figures drop their visible labels.
@@ -269,14 +277,22 @@ function Clocks() {
       </Clock>
       <Clock
         icon={<ZapIcon className="size-3.5 text-primary" aria-hidden />}
-        label="Simulations Left Today"
-        hint="Simulations Left in Today's Quota"
+        label={limitHit ? 'Simulations Today' : 'Simulations Left Today'}
+        hint={
+          limitHit
+            ? 'BRAIN refused more simulations today; sending resumes at the quota reset'
+            : "Simulations Left in Today's Quota"
+        }
         valueFirst
       >
-        <span className="num font-medium text-ink">
-          {exact ? '' : '~'}
-          {fmt.int(remaining)}
-        </span>
+        {limitHit ? (
+          <span className="font-medium text-status-warning">Daily Limit Reached</span>
+        ) : (
+          <span className="num font-medium text-ink">
+            {exact ? '' : '~'}
+            {fmt.int(remaining)}
+          </span>
+        )}
       </Clock>
       <Clock
         icon={<ClockIcon className="size-3.5 text-ink-subtle" aria-hidden />}
