@@ -1,16 +1,24 @@
 """``alpha-harness``: the backend and its built UI in one process, opened in the browser."""
 
 import asyncio
+import contextlib
 import errno
+import logging
 import os
+import signal
 import socket
 import sys
-from typing import Any
+import time
+from typing import TYPE_CHECKING, Any
 
 import uvicorn
 
 from . import updates
 from .window import open_window
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
+    from types import FrameType
 
 HOST = "127.0.0.1"
 PORT = 8000
@@ -19,6 +27,75 @@ PORT_TAKEN = frozenset({errno.EADDRINUSE, 10048})
 #: How long a start straight after an update waits for the page that asked for it to return.
 #: It asks every 1.5 s (RECONNECT_MS in the UI's update.tsx).
 PAGE_RETURN_SECONDS = 10.0
+#: How long closing waits for requests still being answered before it drops them. A request
+#: that polls BRAIN, such as a correlation check, can otherwise hold the close for minutes.
+CLOSE_GRACE_SECONDS = 5.0
+
+
+_UVICORN = logging.getLogger("uvicorn.error")
+
+
+class _Cancelled(logging.Filter):
+    """Drops uvicorn's traceback for a request :func:`_drop_lingering` cancelled on purpose."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        error = record.exc_info[1] if record.exc_info else None
+        return not isinstance(error, asyncio.CancelledError)
+
+
+class _Server(uvicorn.Server):
+    """uvicorn's server, with a second Ctrl-C that hurries the close instead of skipping it.
+
+    To uvicorn a second Ctrl-C means force quit, which skips the app's shutdown: the agents
+    are not stopped and the stores not closed. Here it means stop waiting for requests (see
+    :func:`_drop_lingering`), and the shutdown still runs.
+
+    And without the Ctrl-C uvicorn replays once it has closed: it hands each signal it caught
+    back to whatever embeds it, but Kepler is the whole process and has closed by then, so the
+    replay only turns a clean close into a ``KeyboardInterrupt`` traceback.
+    """
+
+    #: Set by a second Ctrl-C: drop the requests still open now, not after the grace.
+    hurry = False
+
+    def handle_exit(self, sig: int, frame: FrameType | None) -> None:
+        if self.should_exit and sig == signal.SIGINT:
+            self.hurry = True
+            return
+        super().handle_exit(sig, frame)
+
+    @contextlib.contextmanager
+    def capture_signals(self) -> Generator[None]:
+        with super().capture_signals():
+            yield
+            self._captured_signals.clear()
+
+
+async def _drop_lingering(server: _Server) -> None:
+    """Close the connections a shutdown is still waiting on, once it has waited long enough.
+
+    uvicorn waits for every open connection before it closes, and on Python 3.12 and later its
+    force quit cannot cut that short: ``asyncio.Server.wait_closed`` waits for them too. So
+    after :data:`CLOSE_GRACE_SECONDS`, or at once on a second Ctrl-C, each request still being
+    answered is cancelled and its connection closed, and the close goes on to stop the agents
+    and close the stores.
+    """
+    # uvicorn exposes the close only as the ``should_exit`` flag, never an event.
+    while not server.should_exit:  # noqa: ASYNC110
+        await asyncio.sleep(0.2)
+    deadline = time.monotonic() + CLOSE_GRACE_SECONDS
+    while True:
+        if server.hurry or time.monotonic() >= deadline:
+            # The request's task too: uvicorn waits for those after the connections.
+            if tasks := [t for t in server.server_state.tasks if not t.done()]:
+                _UVICORN.info("Closing %d request(s) still waiting on BRAIN.", len(tasks))
+            for task in tasks:
+                task.cancel()
+            for connection in list(server.server_state.connections):
+                transport = getattr(connection, "transport", None)
+                if transport is not None and not transport.is_closing():
+                    transport.abort()
+        await asyncio.sleep(0.2)
 
 
 async def _serve() -> str | None:
@@ -26,7 +103,8 @@ async def _serve() -> str | None:
     listening = _listen()
     from .main import app
 
-    server = uvicorn.Server(uvicorn.Config(app, host=HOST, port=PORT))
+    server = _Server(uvicorn.Config(app, host=HOST, port=PORT))
+    _UVICORN.addFilter(_Cancelled())
     # The one handle that can stop this process gracefully. Reached by the update route, which
     # has to close the app so the launcher can replace it while nothing holds the files open.
     app.state.server = server
@@ -41,6 +119,7 @@ async def _serve() -> str | None:
                 raise
 
     serving = asyncio.create_task(serve())
+    dropping = asyncio.create_task(_drop_lingering(server))
     # Kept referenced for the life of the server, so it is never collected mid-watch.
     watching = asyncio.create_task(_orphaned(server)) if _launched() else None
     # Startup reconciles in-flight simulations first; open the page once it can answer.
@@ -57,6 +136,7 @@ async def _serve() -> str | None:
         ):
             open_window(f"http://{HOST}:{PORT}")
     await serving
+    dropping.cancel()
     if watching is not None:
         watching.cancel()
     failure = getattr(app.state, "startup_failure", None)
