@@ -99,7 +99,7 @@ const READINESS: Record<Readiness, { label: string; tone: Tone; note: string }> 
   blocked: {
     label: 'Blocked',
     tone: 'loss',
-    note: "Over BRAIN's correlation limit.",
+    note: 'Production Correlation over 0.6: too close to alphas others already have.',
   },
 }
 

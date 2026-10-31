@@ -337,6 +337,9 @@ class Allocator:
         # A pass BRAIN cannot take (under the regular limits outside a theme market) is not good.
         themes = await self.state.themes.current()
         rows = await self.state.alphas.by_ids(every) if every else {}
+        # Nor is one others already have: by its own Production Correlation, else its data's.
+        crowding = getattr(self.state, "crowding", None)
+        known = await crowding.measured(every) if crowding is not None and every else {}
         out: dict[str, tuple[int, int, int]] = {}
         for lab, n in sims.items():
             good = 0
@@ -347,6 +350,13 @@ class Allocator:
                     and not form.fading
                     and not form.weak_years
                     and takeable(rows.get(alpha_id) or {}, themes)
+                    and not (
+                        crowding is not None
+                        and await crowding.too_crowded(
+                            (rows.get(alpha_id) or {}).get("expression"),
+                            known.get(alpha_id),
+                        )
+                    )
                 ):
                     good += 1
             out[lab] = (n, len(passes[lab]), good)

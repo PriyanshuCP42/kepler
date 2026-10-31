@@ -48,6 +48,8 @@ log = structlog.get_logger(__name__)
 
 #: Fixes tried per near miss in one task.
 PER_ALPHA = 3
+#: Near misses read per one repaired, so crowded ones can be passed over and the round still filled.
+CROWD_LOOKAHEAD = 4
 #: How often finished repairs are settled.
 SETTLE_SECONDS = 120.0
 NEUTRALIZATIONS = ("MARKET", "SECTOR", "INDUSTRY", "SUBINDUSTRY")
@@ -407,7 +409,8 @@ class RepairEngineer:
         ``ids`` names the alphas to fix instead: the Submission Desk's candidates that BRAIN's
         submission check refused, whatever the Critic made of them.
         """
-        ids = (ids if ids is not None else await self.waiting())[:limit]
+        # Read past ``limit``: crowded near misses are passed over below.
+        ids = (ids if ids is not None else await self.waiting())[: limit * CROWD_LOOKAHEAD]
         if not ids:
             return []
         async with self.state.db.session() as session:
@@ -428,6 +431,19 @@ class RepairEngineer:
             ids,
         )
         schema = await self.state.metadata.cached_settings_schema() or {}
+        # A fix keeps the idea, so it keeps the idea's Production Correlation: repairs of an
+        # alpha others already have came back over 0.7 nearly every time.
+        crowding = getattr(self.state, "crowding", None)
+        if crowding is not None:
+            known = await crowding.measured([str(r["alpha_id"]) for r in rows])
+            rows = [
+                r
+                for r in rows
+                if not await crowding.too_crowded(
+                    r.get("expression"), known.get(str(r["alpha_id"]))
+                )
+            ]
+        rows = sorted(rows, key=lambda r: ids.index(str(r["alpha_id"])))[:limit]
         repairs: list[Repair] = []
         seen: set[str] = set()
         for row in sorted(rows, key=lambda r: ids.index(str(r["alpha_id"]))):

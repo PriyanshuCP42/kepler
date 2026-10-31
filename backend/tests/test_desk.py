@@ -53,6 +53,9 @@ class TestVerdict:
     def test_high_pool_correlation_blocks(self):
         assert judge(None, 0.71, self._lifts())[0] == "blocked"
 
+    def test_over_the_production_target_is_blocked(self):
+        assert judge(0.65, 0.2, self._lifts())[0] == "blocked"
+
     def test_lowering_the_pool_hurts(self):
         assert judge(0.3, 0.2, self._lifts(1.2, 1.0))[0] == "hurts"
 

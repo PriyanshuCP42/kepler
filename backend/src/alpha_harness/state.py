@@ -19,6 +19,7 @@ from .agents.allocator import Allocator
 from .agents.bus import AgentBus
 from .agents.conductor import Conductor
 from .agents.critic import Critic
+from .agents.crowding import Crowding
 from .agents.families import FamilyClerk
 from .agents.genius import GeniusSync
 from .agents.guard import Guard
@@ -173,6 +174,7 @@ class AppState:
         self.allocator = Allocator(self, self.agents)
         self.genius = GeniusSync(self, self.agents)
         self.themes = Themes(self)
+        self.crowding = Crowding(self)
 
         self._renew_lock = asyncio.Lock()
         self._last_session_check = float("-inf")

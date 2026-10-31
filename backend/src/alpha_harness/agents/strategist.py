@@ -156,6 +156,16 @@ def assess(
     return sorted(niches, key=lambda n: n.score, reverse=True)
 
 
+def _crowded(table: dict[str, Any], dataset: Any) -> bool:
+    found = table.get(str(dataset))
+    return bool(found and found.crowded)
+
+
+def _clean(table: dict[str, Any], dataset: Any) -> bool:
+    found = table.get(str(dataset))
+    return bool(found and found.clean)
+
+
 def choose(ranked: list[Niche], count: int) -> list[Niche]:
     """The plan: the best ``count - 1`` niches plus the most valuable barely-tried one, with
     each one's share of the simulations by score."""
@@ -343,8 +353,16 @@ class Strategist:
             ):
                 universe = theme.universe
         in_universe = [r for r in rows if str(r["universe"]) == universe and r["fields"] > 0]
-        # Least crowded first: an Alpha on data few others use correlates less with the pool.
-        in_universe.sort(key=lambda r: (r["alphas"], -r["coverage"]))
+        # Datasets whose measured alphas came back over the Production Correlation target are
+        # left out while others remain; those that came back low go first, then the least
+        # used: an alpha on data few others use correlates less with everyone's.
+        source = getattr(self.state, "crowding", None)
+        table = await source.table() if source is not None else {}
+        clear = [r for r in in_universe if not _crowded(table, r["dataset_id"])]
+        in_universe = clear or in_universe
+        in_universe.sort(
+            key=lambda r: (not _clean(table, r["dataset_id"]), r["alphas"], -r["coverage"])
+        )
         datasets = list(dict.fromkeys(str(r["dataset_id"]) for r in in_universe))[
             :DATASETS_PER_TASK
         ]

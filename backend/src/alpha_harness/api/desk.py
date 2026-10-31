@@ -26,6 +26,7 @@ from sqlalchemy import select
 
 from ..agents import guard
 from ..agents import themes as power_route
+from ..agents.crowding import PROD_TARGET
 from ..agents.repair import BY_ID as REPAIR_MOVES
 from ..brain.platform import (
     IGNORED_CHECKS,
@@ -455,6 +456,12 @@ def judge(
         return "blocked", [
             f"Production Correlation {prod:.2f} is over BRAIN's {PROD_CORRELATION_CEILING}."
         ]
+    if prod is not None and prod > PROD_TARGET:
+        return "blocked", [
+            f"Production Correlation {prod:.2f} is over Kepler's {PROD_TARGET}: BRAIN would take "
+            "it, but it is too close to alphas others already have to lift your combined "
+            "performance."
+        ]
     if pool is not None and pool >= SELF_CORRELATION_CEILING:
         return "blocked", [
             f"Correlates {pool:.2f} with your pool; BRAIN's limit is {SELF_CORRELATION_CEILING}."
@@ -764,7 +771,7 @@ async def desk(state: State) -> Desk:
         candidates=out,
         submitted=len(scopes[WHOLE]),
         unmeasured=sum(1 for c in out if not c.effects),
-        prod_ceiling=PROD_CORRELATION_CEILING,
+        prod_ceiling=PROD_TARGET,
         self_ceiling=SELF_CORRELATION_CEILING,
         pool_years=[
             YearSharpe(year=int(y["year"]), sharpe=y.get("sharpe")) for y in pool["yearly"]
