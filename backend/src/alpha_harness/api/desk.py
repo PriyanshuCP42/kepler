@@ -591,13 +591,53 @@ async def _unblocked_first(
 
     An alpha measured too close to production never becomes Ready as it is, so it only takes a
     place no open candidate needs; otherwise thirty of them would hold the Desk for good and
-    keep every newer pass, and its Production Correlation check, out of sight.
+    keep every newer pass, and its Production Correlation check, out of sight. A blocked
+    family leader gives its place to the family's best member measured under the target, which
+    ``stored`` then holds too: the leader is only the best score, not the only way in.
     """
     checks = {v.alpha_id: checks_of(stored[v.alpha_id].get("checks")) for v in chosen}
     prod = await prod_correlations(state, list(checks), checks)
     blocked = {a for a, value in prod.items() if value > PROD_TARGET}
-    open_ = [v for v in chosen if v.alpha_id not in blocked]
-    return [*open_, *(v for v in chosen if v.alpha_id in blocked)][:CANDIDATES]
+    stand_ins = await _clean_members(state, blocked, stored)
+    open_ = [
+        stand_ins.get(v.alpha_id, v)
+        for v in chosen
+        if v.alpha_id not in blocked or v.alpha_id in stand_ins
+    ]
+    rest = [v for v in chosen if v.alpha_id in blocked and v.alpha_id not in stand_ins]
+    return [*open_, *rest][:CANDIDATES]
+
+
+async def _clean_members(
+    state: Any, leaders: set[str], stored: dict[str, dict[str, Any]]
+) -> dict[str, CriticVerdict]:
+    """Per blocked leader, its family's best-scored unsubmitted pass measured under
+    :data:`PROD_TARGET`, its row added to ``stored``."""
+    if not leaders:
+        return {}
+    async with state.db.session() as session:
+        members = list(
+            await session.scalars(
+                select(CriticVerdict)
+                .where(
+                    CriticVerdict.verdict == "pass",
+                    CriticVerdict.family_id.in_(leaders),
+                    CriticVerdict.alpha_id != CriticVerdict.family_id,
+                )
+                .order_by(CriticVerdict.score.desc())
+            )
+        )
+    rows = await state.alphas.by_ids([m.alpha_id for m in members])
+    members = [m for m in members if m.alpha_id in rows and not is_submitted(rows[m.alpha_id])]
+    checks = {m.alpha_id: checks_of(rows[m.alpha_id].get("checks")) for m in members}
+    prod = await prod_correlations(state, list(checks), checks)
+    found: dict[str, CriticVerdict] = {}
+    for m in members:
+        value = prod.get(m.alpha_id)
+        if m.family_id not in found and value is not None and value <= PROD_TARGET:
+            found[str(m.family_id)] = m
+            stored[m.alpha_id] = rows[m.alpha_id]
+    return found
 
 
 @router.get("")
