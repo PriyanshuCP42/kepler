@@ -48,6 +48,8 @@ router = APIRouter(prefix="/api/desk", tags=["desk"])
 
 #: Candidates the desk weighs, best Critic score first.
 CANDIDATES = 40
+#: Critic passes read per shortlist place, so blocked ones can be passed over.
+SHORTLIST_DEPTH = 6
 WHOLE = "all"
 #: Every submitted Power Pool Alpha, whatever its region: what Combined Power Pool Alpha
 #: Performance combines.
@@ -582,6 +584,22 @@ async def _pyramids(state: Any) -> tuple[dict[str, str], dict[tuple[str, int, st
     return categories, niches
 
 
+async def _unblocked_first(
+    state: Any, chosen: list[CriticVerdict], stored: dict[str, dict[str, Any]]
+) -> list[CriticVerdict]:
+    """The shortlist, alphas BRAIN measured over :data:`PROD_TARGET` last.
+
+    An alpha measured too close to production never becomes Ready as it is, so it only takes a
+    place no open candidate needs; otherwise thirty of them would hold the Desk for good and
+    keep every newer pass, and its Production Correlation check, out of sight.
+    """
+    checks = {v.alpha_id: checks_of(stored[v.alpha_id].get("checks")) for v in chosen}
+    prod = await prod_correlations(state, list(checks), checks)
+    blocked = {a for a, value in prod.items() if value > PROD_TARGET}
+    open_ = [v for v in chosen if v.alpha_id not in blocked]
+    return [*open_, *(v for v in chosen if v.alpha_id in blocked)][:CANDIDATES]
+
+
 @router.get("")
 async def desk(state: State) -> Desk:
     """The best unsubmitted Critic passes, one per family, with their effect on your pool."""
@@ -594,12 +612,12 @@ async def desk(state: State) -> Desk:
                     CriticVerdict.family_id == CriticVerdict.alpha_id,
                 )
                 .order_by(CriticVerdict.score.desc())
-                .limit(CANDIDATES * 2)
+                .limit(CANDIDATES * SHORTLIST_DEPTH)
             )
         ).all()
     stored = await state.alphas.by_ids([v.alpha_id for v in verdicts])
     chosen = [v for v in verdicts if v.alpha_id in stored and not is_submitted(stored[v.alpha_id])]
-    chosen = chosen[:CANDIDATES]
+    chosen = await _unblocked_first(state, chosen, stored)
 
     members = await state.alphas.submitted_members()
     scopes: dict[str, list[str]] = {WHOLE: [str(m["alpha_id"]) for m in members]}
@@ -855,11 +873,16 @@ _ORDER: dict[Readiness, int] = {
 }
 
 
-def _rank(candidate: Candidate) -> tuple[int, float]:
-    """Ready first, then by how much it improves your whole pool's combined performance in the
-    recent years, the nearest to what BRAIN scores."""
+def _rank(candidate: Candidate) -> tuple[int, bool, float]:
+    """Ready first; within each, one that completes a pyramid; then by how much it improves your
+    whole pool's combined performance in the recent years, the nearest to what BRAIN scores."""
     whole = next((e for e in candidate.effects if e.scope == WHOLE), None)
-    return _ORDER[candidate.readiness], whole.impact.total if whole and whole.impact else 0.0
+    completes = bool(candidate.pyramid and candidate.pyramid.completes)
+    return (
+        _ORDER[candidate.readiness],
+        completes,
+        whole.impact.total if whole and whole.impact else 0.0,
+    )
 
 
 def sharpe_change(effects: list[Effect], scope: str, *, recent: bool = False) -> float | None:

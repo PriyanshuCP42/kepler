@@ -64,10 +64,21 @@ DATASETS_PER_TASK = 3
 VECTOR_OPERATORS = ("vec_avg",)
 
 
+#: A pyramid one Alpha short of lighting: the next Alpha there lights a whole pyramid.
+LAST_ONE = 2.0
+#: A market holding more than this share of your submitted pool is already heavy in it...
+POOL_HEAVY = 0.25
+#: ...and its niches are scaled by this: more of the same moves Combined Alpha Performance
+#: together with what is already there, which is how it went negative.
+POOL_HEAVY_FACTOR = 0.5
+
+
 def need(submitted: int) -> float:
     """How much a pyramid still needs Alphas this quarter, from those already submitted."""
     if submitted >= PYRAMID_MIN_ALPHAS:
         return 0.35
+    if submitted == PYRAMID_MIN_ALPHAS - 1:
+        return LAST_ONE
     return 1.0 + 0.15 * submitted
 
 
@@ -109,14 +120,17 @@ def assess(
     niches: list[Niche],
     rng: random.Random | None = None,
     themes: dict[tuple[str, int], tuple[str, float]] | None = None,
+    pool: dict[tuple[str, int], int] | None = None,
 ) -> list[Niche]:
     """Score every niche and return them best first. Pure apart from the random draws.
 
     ``themes`` maps a market (region, delay) to this month's Power Pool theme there and its
     multiplier: only in such a market can an alpha under the regular limits be submitted, so
-    its niches are boosted by :data:`THEME_BOOST` per unit of multiplier.
+    its niches are boosted by :data:`THEME_BOOST` per unit of multiplier. ``pool`` counts your
+    submitted Alphas per market; a market over :data:`POOL_HEAVY` of them is scaled down.
     """
     rng = rng or random.Random()
+    total = sum((pool or {}).values())
     for niche in niches:
         niche.reasons = []
         niche.value = (niche.multiplier or 1.0) * need(niche.submitted)
@@ -125,6 +139,13 @@ def assess(
         if theme is not None:
             niche.boost *= 1 + THEME_BOOST * theme[1]
             niche.reasons.append(f"This month's {theme[0]} Power Pool theme covers it.")
+        held = (pool or {}).get((niche.region, niche.delay), 0)
+        if total and held / total > POOL_HEAVY:
+            niche.boost *= POOL_HEAVY_FACTOR
+            niche.reasons.append(
+                f"{niche.region} D{niche.delay} already holds {held} of your {total} submitted "
+                "Alphas."
+            )
         shape = PRIOR_SHAPE + niche.families
         rate = PRIOR_RATE + niche.simulations / 100
         niche.expected = shape / rate
@@ -234,7 +255,15 @@ class Strategist:
             for t in await self._themes()
             if t.region is not None and t.delay is not None
         }
-        return assess(await self.niche_map(), random.Random(seed), themes)
+        return assess(await self.niche_map(), random.Random(seed), themes, await self._pool())
+
+    async def _pool(self) -> dict[tuple[str, int], int]:
+        """Your submitted Alphas per market."""
+        pool: dict[tuple[str, int], int] = {}
+        for member in await self.state.alphas.submitted_members():
+            market = (str(member["region"]), int(member["delay"] or 0))
+            pool[market] = pool.get(market, 0) + 1
+        return pool
 
     async def _load_history(self) -> dict[tuple[str, int, str], dict[str, int]]:
         """Per niche: simulations, Critic passes and new families, all time and recent."""

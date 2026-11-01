@@ -5,7 +5,11 @@ an alpha that passes every check on its in-sample years but falls apart on the y
 not fitted on will pull Combined Alpha Performance down once it is in the pool. So on top of
 BRAIN's checks it applies, from the numbers the vault already stores:
 
-- **Decay**: the test years' Sharpe must keep at least :data:`MIN_DECAY` of the train years'.
+- **Decay**: the test years' Sharpe must keep at least :data:`MIN_DECAY` of the train years',
+  or, for an alpha whose train Sharpe is far above the bar, still clear BRAIN's Sharpe limit by
+  :data:`STRONG_TEST` on its own while keeping :data:`STRONG_DECAY` of it. A ratio alone
+  punishes an alpha for being strong in-sample: test 2.6 against train 5.0 holds up better
+  than test 1.2 against train 1.9.
 - **Cost**: a margin under :data:`MIN_MARGIN_BPS` leaves too little after trading costs.
 - **Size**: at most :data:`MAX_OPERATORS` operators, the Power Pool limit; fewer score better.
 
@@ -45,6 +49,10 @@ Verdict = Literal["pass", "near_miss", "fail", "unjudged"]
 MIN_DECAY = 0.6
 #: Below this share it is overfitting, not a near miss.
 NEAR_DECAY = 0.3
+#: A test Sharpe this many times BRAIN's Sharpe limit holds up whatever the train years say...
+STRONG_TEST = 1.3
+#: ...as long as it keeps at least this share of them.
+STRONG_DECAY = 0.45
 #: Trading cost assumed per unit traded, in basis points, as on the Portfolio page.
 COST_BPS = 2.0
 #: Margin that leaves a third of the Sharpe after :data:`COST_BPS`.
@@ -89,6 +97,16 @@ def _clip(value: float) -> float:
 
 def _gate(ok: bool | None, value: Any, note: str) -> dict[str, Any]:
     return {"ok": ok, "value": value, "note": note}
+
+
+def _sharpe_limit(checks: list[dict[str, Any]]) -> float | None:
+    """BRAIN's Sharpe limit for this alpha's market, as its own check reports it."""
+    for check in checks:
+        if str(check.get("name", "")).upper() == "LOW_SHARPE":
+            limit = _num(check.get("limit"))
+            if limit is not None and limit > 0:
+                return limit
+    return None
 
 
 def judge(row: dict[str, Any]) -> Judgement:
@@ -136,9 +154,17 @@ def judge(row: dict[str, Any]) -> Judgement:
     ratio: float | None = None
     if train is not None and test is not None and train > 0:
         ratio = test / train
+        bar = _sharpe_limit(checks)
         if ratio >= MIN_DECAY:
             gates["decay"] = _gate(
                 True, round(ratio, 2), f"Test years keep {ratio:.0%} of train Sharpe."
+            )
+        elif bar is not None and ratio >= STRONG_DECAY and test >= STRONG_TEST * bar:
+            gates["decay"] = _gate(
+                True,
+                round(ratio, 2),
+                f"Test Sharpe {test:.2f} clears BRAIN's {bar:g} by {test / bar:.1f}x, "
+                f"keeping {ratio:.0%} of a strong train Sharpe.",
             )
         else:
             gates["decay"] = _gate(

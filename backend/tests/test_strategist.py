@@ -96,6 +96,9 @@ async def test_the_plan_shown_is_the_plan_written():
                 for n in niches
             ]
 
+        async def _pool(self):
+            return {}
+
     strategist = Fixed(state=None, bus=None)
     first = [n.category for n in await strategist.assessed()]
     second = [n.category for n in await strategist.assessed()]
