@@ -39,7 +39,7 @@ from ..db.models import (
     utcnow,
 )
 from ..vault.yields import checks_of, clean, gating_results, limits_of, verdict
-from . import distributions, scheduler
+from . import distributions, probe, scheduler
 from . import objectives as obj
 from .objectives import StudyNotFoundError
 from .params import SEARCH_SAMPLER, TASK_SAMPLERS, TEMPLATE_SAMPLER, SearchParams, params_of
@@ -204,10 +204,45 @@ class Optimizer:
             told = await self._harvest(
                 study_id, tell=row.sampler in (SEARCH_SAMPLER, TEMPLATE_SAMPLER)
             )
+            if row.sampler == TEMPLATE_SAMPLER and await self._probe(study_id):
+                return {"told": told, "asked": 0}
             asked = await scheduler.advance(self, study_id)
         if told or asked:
             await self.notify()
         return {"told": told, "asked": asked}
+
+    async def _probe(self, study_id: int) -> bool:
+        """Decide a large template task's probe once enough is back; ``True`` when it stopped
+        the task (:mod:`.probe`)."""
+        async with self.db.session() as session:
+            row = await session.get(Study, study_id)
+            if row is None:
+                return False
+            finished = list(
+                await session.scalars(
+                    select(Trial.alpha_id).where(
+                        Trial.study_id == study_id,
+                        Trial.state == TrialState.COMPLETE,
+                        Trial.alpha_id.is_not(None),
+                    )
+                )
+            )
+            if not probe.due(row.sampler_params or {}, row.max_trials, len(finished)):
+                return False
+        stored = await self.alphas.by_ids([a for a in finished if a])
+        found = probe.judge(list(stored.values()))
+        async with self.db.session() as session:
+            row = await session.get(Study, study_id)
+            if row is None:
+                return False
+            outcome = "passed" if found.passed else "stopped"
+            row.sampler_params = {**(row.sampler_params or {}), probe.KEY: outcome}
+            await session.commit()
+        log.info("optimize.probe", study_id=study_id, passed=found.passed, best=found.best)
+        if found.passed:
+            return False
+        await scheduler.finish(self, study_id, StudyStatus.COMPLETE, found.message)
+        return True
 
     async def _harvest(self, study_id: int, *, tell: bool) -> int:
         """Score every trial whose simulation reached a terminal state.
