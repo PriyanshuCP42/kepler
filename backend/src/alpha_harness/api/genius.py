@@ -244,8 +244,11 @@ def _osmosis_view(scopes: list[osmosis.Scope]) -> OsmosisView:
     advice: list[str] = []
     if len(eligible) < osmosis.MIN_SCOPES:
         need = osmosis.MIN_SCOPES - len(eligible)
+        # Delay 1 first: BRAIN allows 5 Delay 0 submissions a month, at a higher bar.
         closest = sorted(
-            (s for s in scopes if not s.eligible), key=lambda s: s.alphas, reverse=True
+            (s for s in scopes if not s.eligible),
+            key=lambda s: (s.delay == 1, s.alphas),
+            reverse=True,
         )[:need]
         advice.append(
             f"Only {len(eligible)} scope{'' if len(eligible) == 1 else 's'} hold the "

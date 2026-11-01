@@ -26,7 +26,8 @@ from . import genius
 TTL = 6 * 3600
 #: Leaderboard rows read: the board is ranked, and the levels sit near its top.
 BOARD_ROWS = 3000
-_PAGE = 500
+#: BRAIN gives at most 100 rows a page, whatever is asked.
+_PAGE = 100
 
 #: The four combined performances, of which the best counts.
 PERFORMANCES = {
@@ -185,9 +186,9 @@ class MasterTracker:
             board: list[dict[str, Any]] = []
             for offset in range(0, BOARD_ROWS, _PAGE):
                 page = await self.state.endpoints.genius_board(_PAGE, offset)
-                board += page
-                if len(page) < _PAGE:
+                if not page:
                     break
+                board += page
             self._board = board
             self._read = time.monotonic()
             return self._current, self._board
