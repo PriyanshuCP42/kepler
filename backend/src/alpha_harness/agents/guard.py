@@ -9,6 +9,10 @@ So before a finalist is called ready, three checks:
   universe. A real signal
   sits on a plateau, and most neighbours keep most of its Sharpe; a fitted one sits on a spike,
   and its neighbours fall away. Costs a few simulations per finalist, written as one task.
+  Three neighbours go further, each with its own bar: ``rank`` of it (no scale, no outliers),
+  ``sign`` of it (direction only: an edge that lives in a few extreme values loses it all),
+  and the same expression in another market, the strongest out-of-sample test there is:
+  an idea fitted to one market's history rarely carries to another's.
 - **The luck bar.** How high a test Sharpe the best of ``n`` variants of one idea reaches by
   chance alone: about ``sqrt(2 ln n)`` standard errors, where a Sharpe measured over ``T``
   years has a standard error of about ``1 / sqrt(T)``. Variants of one idea move together, so
@@ -42,9 +46,10 @@ from sqlalchemy import select
 
 from ..brain.platform import MULTI_SIMULATION_SIZE, TEST_PERIOD_YEARS
 from ..db.models import GuardCheck, Trial, TrialState, utcnow
+from ..labs.fastexpr import ParseError
 from ..labs.launch import AddedTask, add_study
 from ..labs.params import GUARD_SAMPLER, GuardParams
-from ..tools import settings_sampler
+from ..tools import correlation_breaker, settings_sampler
 from ..vault import metrics
 from .repair import (
     Options,
@@ -66,6 +71,24 @@ log = structlog.get_logger(__name__)
 
 #: A neighbour holds when it keeps this share of the finalist's Sharpe.
 HOLD = 0.7
+#: ``sign`` throws away every magnitude, so it is held to less.
+SIGN_HOLD = 0.5
+#: Another market's level differs; carrying the idea at all is what is asked.
+OTHER_MARKET_HOLD = 0.4
+#: Where an idea is tried out of its own market: a sibling with different stocks.
+OTHER_MARKET = {
+    "DEU": "GBR",
+    "GBR": "DEU",
+    "EUR": "USA",
+    "USA": "EUR",
+    "GLB": "USA",
+    "ASI": "USA",
+    "AMR": "USA",
+    "KOR": "HKG",
+    "HKG": "KOR",
+    "CHN": "HKG",
+    "IND": "ASI",
+}
 #: Share of measured neighbours that must hold for a plateau.
 PLATEAU = 2 / 3
 #: Neighbours that must come back measured before a verdict.
@@ -145,13 +168,28 @@ _TIGHTER = setting_move(_truncation_tighter)
 _COARSER = setting_move(neutralization_step(-1))
 
 
+def _around(tail: str) -> Transform:
+    """The finalist bound to ``alpha`` and ``tail`` taken of it."""
+
+    def apply(expression: str, settings: Settings, _: Options) -> tuple[str, Settings] | None:
+        try:
+            return correlation_breaker.compress(expression).program(tail), settings
+        except ParseError:
+            return None
+
+    return apply
+
+
 @dataclass(frozen=True, slots=True)
 class Neighbour:
     id: str
     name: str
-    apply: Transform
+    apply: Transform | None
+    #: Share of the finalist's Sharpe it must keep to hold.
+    keep: float = HOLD
 
 
+OTHER_MARKET_ID = "other_market"
 NEIGHBOURS = (
     Neighbour("windows_down", "Windows 30% shorter", _windows(0.7)),
     Neighbour("windows_up", "Windows 40% longer", _windows(1.4)),
@@ -159,8 +197,42 @@ NEIGHBOURS = (
     Neighbour("tighter_truncation", "Truncation a quarter tighter", _TIGHTER),
     Neighbour("coarser_neutralization", "Next coarser neutralization", _COARSER),
     Neighbour("wider_universe", "Next larger universe", setting_move(universe_step(1))),
+    Neighbour("rank", "Ranked", _around("rank(alpha)")),
+    Neighbour("sign", "Direction only (sign)", _around("sign(alpha)"), SIGN_HOLD),
+    # Built in :func:`neighbours_of`, which has the schema another market's options come from.
+    Neighbour(OTHER_MARKET_ID, "Same idea in another market", None, OTHER_MARKET_HOLD),
 )
 NAMES: dict[str, str] = {n.id: n.name for n in NEIGHBOURS}
+KEEPS: dict[str, float] = {n.id: n.keep for n in NEIGHBOURS}
+
+
+def _largest(universes: tuple[str, ...]) -> str | None:
+    """The broadest ``TOPn`` universe offered, else the first."""
+    sized = sorted(
+        (
+            (int(m.group()), u)
+            for u in universes
+            if u.upper().startswith("TOP") and (m := re.search(r"\d+", u))
+        ),
+        reverse=True,
+    )
+    return sized[0][1] if sized else (universes[0] if universes else None)
+
+
+def other_market(settings: Settings, schema: dict[str, Any]) -> Settings | None:
+    """The finalist's settings moved to :data:`OTHER_MARKET`'s pick for its region: that
+    market's broadest universe, its neutralization kept where offered, else industry."""
+    region = OTHER_MARKET.get(str(settings.get("region")))
+    if region is None:
+        return None
+    moved = settings | {"region": region}
+    universe = _largest(options_for(schema, moved).universes)
+    if universe is None:
+        return None
+    moved["universe"] = universe
+    if moved.get("neutralization") not in options_for(schema, moved).neutralizations:
+        moved["neutralization"] = "INDUSTRY"
+    return moved
 
 
 def neighbours_of(
@@ -174,10 +246,17 @@ def neighbours_of(
     options = options_for(schema, base)
     out: list[tuple[str, SimulationRequest]] = []
     for neighbour in NEIGHBOURS:
+        if neighbour.apply is None:
+            continue
         built = neighbour.apply(expression, base, options)
         request = None if built is None else checked_request(*built, schema)
         if request is not None:
             out.append((neighbour.id, request))
+    # A field the other market lacks makes BRAIN refuse it; the neighbour then tells nothing.
+    moved = other_market(base, schema)
+    request = None if moved is None else checked_request(expression, moved, schema)
+    if request is not None:
+        out.append((OTHER_MARKET_ID, request))
     return out
 
 
@@ -300,12 +379,16 @@ class Verdict:
 
 
 def holds(
-    origin_sharpe: float | None, sharpe: float | None, test_sharpe: float | None
+    origin_sharpe: float | None,
+    sharpe: float | None,
+    test_sharpe: float | None,
+    keep: float = HOLD,
 ) -> bool | None:
-    """Whether a neighbour keeps the finalist's signal; ``None`` when it cannot be told."""
+    """Whether a neighbour keeps ``keep`` of the finalist's signal; ``None`` when it cannot be
+    told."""
     if origin_sharpe is None or sharpe is None or origin_sharpe <= 0:
         return None
-    return sharpe >= HOLD * origin_sharpe and (test_sharpe is None or test_sharpe > 0)
+    return sharpe >= keep * origin_sharpe and (test_sharpe is None or test_sharpe > 0)
 
 
 def verdict(results: list[NeighbourResult]) -> Verdict:
@@ -421,7 +504,9 @@ class Guard:
                 result.state = "done"
                 result.sharpe, result.test_sharpe = row.get("sharpe"), row.get("test_sharpe")
                 origin = origins[check.origin_alpha_id]
-                result.holds = holds(origin.get("sharpe"), result.sharpe, result.test_sharpe)
+                result.holds = holds(
+                    origin.get("sharpe"), result.sharpe, result.test_sharpe, KEEPS.get(kind, HOLD)
+                )
             elif (
                 trial is None
                 or trial.state == TrialState.FAIL

@@ -35,6 +35,51 @@ class TestNeighbours:
         assert found["tighter_truncation"].settings.truncation == pytest.approx(0.06)
         assert "windows_down" not in found
 
+    def test_rank_and_sign_take_the_whole_expression(self):
+        row = {
+            "expression": "a = ts_rank(close, 20);\na - ts_mean(a, 5)",
+            "region": "USA",
+            "universe": "TOP3000",
+            "delay": 1,
+            "neutralization": "SUBINDUSTRY",
+            "decay": 4,
+            "truncation": 0.08,
+        }
+        found = dict(guard.neighbours_of(row, {}))
+        assert found["rank"].regular.rstrip().endswith("rank(alpha)")
+        assert found["sign"].regular.rstrip().endswith("sign(alpha)")
+
+    def test_the_same_idea_is_tried_in_another_market(self):
+        markets = {"DEU": [{"value": "TOP500"}], "GBR": [{"value": "TOP300"}, {"value": "TOP700"}]}
+        schema = {
+            "universe": {"choices": {"region": markets}},
+            "neutralization": {
+                "choices": {
+                    "region": {
+                        "DEU": [{"value": "SUBINDUSTRY"}, {"value": "INDUSTRY"}],
+                        "GBR": [{"value": "INDUSTRY"}],
+                    }
+                }
+            },
+        }
+        row = {
+            "expression": "rank(close)",
+            "region": "DEU",
+            "universe": "TOP500",
+            "delay": 1,
+            "neutralization": "SUBINDUSTRY",
+            "decay": 4,
+            "truncation": 0.08,
+        }
+        moved = dict(guard.neighbours_of(row, schema))["other_market"].settings
+        assert (moved.region, moved.universe, moved.neutralization) == ("GBR", "TOP700", "INDUSTRY")
+        assert guard.other_market({"region": "BRA"}, schema) is None
+
+    def test_sign_and_another_market_are_held_to_less(self):
+        assert guard.holds(2.0, 1.1, 0.5, guard.KEEPS["sign"]) is True
+        assert guard.holds(2.0, 1.1, 0.5, guard.KEEPS["windows_up"]) is False
+        assert guard.holds(2.0, 0.85, 0.2, guard.KEEPS["other_market"]) is True
+
 
 class TestLuckBar:
     def test_one_try_has_no_bar(self):
