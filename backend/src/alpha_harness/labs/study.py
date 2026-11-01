@@ -231,6 +231,8 @@ class Optimizer:
                 return False
         stored = await self.alphas.by_ids([a for a in finished if a])
         found = probe.judge(list(stored.values()))
+        if found is None:
+            return False
         async with self.db.session() as session:
             row = await session.get(Study, study_id)
             if row is None:

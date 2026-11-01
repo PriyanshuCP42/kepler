@@ -30,15 +30,15 @@ FALLBACK_LIMIT = 1.58
 @dataclass(frozen=True, slots=True)
 class Probe:
     passed: bool
-    best: float | None
+    best: float
     bar: float
     simulations: int
 
     @property
     def message(self) -> str:
-        best = "no Sharpe" if self.best is None else f"a best Sharpe of {self.best:.2f}"
         return (
-            f"Stopped by the probe: {self.simulations} simulations reached {best}, under "
+            f"Stopped by the probe: {self.simulations} simulations reached a best Sharpe of "
+            f"{self.best:.2f}, under "
             f"{self.bar:.2f} ({PROBE_SHARE:.0%} of BRAIN's Sharpe limit). Unsent simulations "
             "were dropped; run the task again to spend them anyway."
         )
@@ -56,12 +56,16 @@ def sharpe_limit(rows: list[dict[str, Any]]) -> float:
     return FALLBACK_LIMIT
 
 
-def judge(rows: list[dict[str, Any]]) -> Probe:
-    """The probe over these finished results. Pure."""
+def judge(rows: list[dict[str, Any]]) -> Probe | None:
+    """The probe over these stored results, or ``None`` while fewer than
+    :data:`PROBE_TRIALS` of them carry a Sharpe: BRAIN can finish simulations before the vault
+    has stored them, and a probe of fewer would cut an idea on less than it promises. Pure."""
     sharpes = [float(s) for r in rows if isinstance(s := r.get("sharpe"), int | float)]
+    if len(sharpes) < PROBE_TRIALS:
+        return None
     bar = PROBE_SHARE * sharpe_limit(rows)
-    best = max(sharpes) if sharpes else None
-    return Probe(best is not None and best >= bar, best, bar, len(rows))
+    best = max(sharpes)
+    return Probe(best >= bar, best, bar, len(sharpes))
 
 
 def due(params: dict[str, Any], max_trials: int, finished: int) -> bool:
