@@ -6,6 +6,7 @@ stopped, changed or removed. Search Lab, Template Lab and Evolution Lab add sche
 """
 
 import asyncio
+import collections
 import contextlib
 import itertools
 import json
@@ -18,7 +19,7 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select, update
 
-from ..brain.errors import BrainError, BrainRateLimited
+from ..brain.errors import BrainError, BrainPollTimeout, BrainRateLimited
 from ..brain.platform import (
     POWER_POOL_CORRELATION_CEILING,
     POWER_POOL_ESCAPE,
@@ -595,9 +596,16 @@ async def check_prod_correlation(body: AlphaIds, state: State) -> WorkflowStarte
             a for a in alpha_ids if a in stored and not is_submitted(stored[a]) and a not in known
         ]
         failed = 0
-        for done, alpha_id in enumerate(wanted):
+        # BRAIN can still be working on one when its poll gives up, and finishes it on its own:
+        # asked again after the rest, it usually answers at once. Once, so none loops forever.
+        queue = collections.deque(wanted)
+        requeued: set[str] = set()
+        done = 0
+        while queue:
+            alpha_id = queue.popleft()
             progress = f"{done} of {len(wanted)}"
             await state.tasks.update(task, progress=done / len(wanted), detail=progress)
+            done += 1
             while True:
                 try:
                     answer = await state.endpoints.correlations(alpha_id, "prod")
@@ -611,6 +619,15 @@ async def check_prod_correlation(body: AlphaIds, state: State) -> WorkflowStarte
                     )
                     await asyncio.sleep(wait)
                     continue
+                except BrainPollTimeout:
+                    if alpha_id in requeued:
+                        log.warning("prod_correlation.still_pending", alpha_id=alpha_id)
+                        failed += 1
+                    else:
+                        requeued.add(alpha_id)
+                        queue.append(alpha_id)
+                        done -= 1
+                    break
                 # One Alpha BRAIN cannot check must not abandon the rest.
                 except BrainError as exc:
                     log.warning("prod_correlation.failed", alpha_id=alpha_id, error=exc.message)
