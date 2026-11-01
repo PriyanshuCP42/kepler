@@ -297,3 +297,53 @@ class TestFixRule:
         from alpha_harness.api.desk import fix_for, submission_of
 
         assert fix_for(submission_of(None, None, []), power_pool=True, repaired=False) is None
+
+
+class TestBrainComparisonHarm:
+    def test_fitness_and_margin_falls_block_even_when_sharpe_rises(self):
+        # alpha-b's own comparison: Sharpe up, but Fitness down and margin to 4.1 bps.
+        found = BrainComparison(
+            "EQUITY:ASI:1:POWER_POOL",
+            {"sharpe": 4.45, "fitness": 2.38, "drawdown": 0.0187, "margin": 5.7e-4},
+            {"sharpe": 4.70, "fitness": 2.12, "drawdown": 0.0182, "margin": 4.1e-4},
+        )
+        assert found.harms == ["Fitness falls", "margin falls under 5 bps"]
+        readiness, reasons = judge(0.4, 0.2, [], brain=found)
+        assert readiness == "hurts"
+        assert "Fitness falls and margin falls under 5 bps" in reasons[0]
+
+    def test_a_margin_already_thin_but_rising_is_not_held_against_it(self):
+        found = BrainComparison(
+            "EQUITY:EUR:1",
+            {"sharpe": 3.0, "fitness": 2.0, "margin": 3.0e-4},
+            {"sharpe": 3.1, "fitness": 2.1, "margin": 3.5e-4},
+        )
+        assert found.harms == []
+
+
+class TestBindingCorrelation:
+    def _days(self, seed: int, base=None):
+        rng = np.random.default_rng(seed)
+        noise = rng.normal(0, 1, 900) if base is None else base + rng.normal(0, 0.1, 900)
+        start = date(2020, 1, 1)
+        return {start + timedelta(days=i): float(noise[i]) for i in range(900)}
+
+    def test_a_twin_of_a_submitted_alpha_is_held_to_its_correlation(self):
+        from alpha_harness.agents import families
+        from alpha_harness.api.desk import binding_correlation
+
+        member = self._days(1)
+        twin = self._days(2, base=np.array(list(member.values())))
+        pool = families.pool_series({"alpha-a": member, "other": self._days(3)})
+        rho = binding_correlation(twin, 4.74, pool, {"alpha-a": 4.45, "other": 2.0})
+        assert rho is not None and rho > 0.9
+
+    def test_ten_percent_more_sharpe_is_brains_exception(self):
+        from alpha_harness.agents import families
+        from alpha_harness.api.desk import binding_correlation
+
+        member = self._days(1)
+        twin = self._days(2, base=np.array(list(member.values())))
+        pool = families.pool_series({"alpha-a": member, "other": self._days(3)})
+        rho = binding_correlation(twin, 5.0, pool, {"alpha-a": 4.45, "other": 2.0})
+        assert rho is not None and rho < 0.7

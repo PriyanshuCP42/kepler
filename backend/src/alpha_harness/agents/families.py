@@ -53,11 +53,29 @@ IDLE_SECONDS = 120.0
 POOL_TTL = 1800.0
 
 
-def _windowed(days: dict[date, float]) -> Series | None:
+def windowed(days: dict[date, float]) -> Series | None:
     if not days:
         return None
     start = window_start(max(days))
     return series_of({d: v for d, v in days.items() if d >= start})
+
+
+def closest(days: dict[date, float] | None, pool: dict[str, Series]) -> tuple[str, float] | None:
+    """The submitted Alpha this one moves with most, over BRAIN's correlation window."""
+    series = windowed(days or {})
+    if series is None:
+        return None
+    worst: tuple[str, float] | None = None
+    for other_id, other in pool.items():
+        rho = correlation(series, other)
+        if rho is not None and (worst is None or rho > worst[1]):
+            worst = (other_id, rho)
+    return worst
+
+
+def pool_series(days: dict[str, dict[date, float]]) -> dict[str, Series]:
+    """Submitted Alphas' daily PnL as compared, over BRAIN's correlation window."""
+    return {a: s for a, d in days.items() if (s := windowed(d)) is not None}
 
 
 class FamilyClerk:
@@ -79,6 +97,7 @@ class FamilyClerk:
         self.bus = bus
         self._task: asyncio.Task[None] | None = None
         self._pool: dict[str, Series] = {}
+        self._pool_ids: set[str] = set()
         self._pool_read = float("-inf")
         self._leaders: dict[str, Series] = {}
         self._leaders_loaded = False
@@ -164,7 +183,7 @@ class FamilyClerk:
     def _place(
         self, alpha_id: str, days: dict[date, float] | None, pool: dict[str, Series]
     ) -> dict[str, Any]:
-        series = _windowed(days or {})
+        series = windowed(days or {})
         outcome: dict[str, Any] = {
             "alpha_id": alpha_id,
             "verdict": "pass",
@@ -175,11 +194,7 @@ class FamilyClerk:
         if series is None:
             outcome["note"] = "Not enough daily PnL to compare with your pool."
             return outcome
-        worst: tuple[str, float] | None = None
-        for other_id, other in pool.items():
-            rho = correlation(series, other)
-            if rho is not None and (worst is None or rho > worst[1]):
-                worst = (other_id, rho)
+        worst = closest(days, pool)
         outcome["pool"] = None if worst is None else round(worst[1], 3)
         if worst is not None and worst[1] >= POOL_LIMIT:
             outcome["verdict"] = "near_miss"
@@ -241,12 +256,13 @@ class FamilyClerk:
         return days, unread
 
     async def _pool_series(self) -> dict[str, Series]:
-        if time.monotonic() - self._pool_read < POOL_TTL:
-            return self._pool
         members = await self.alphas.submitted_members()
         ids = [str(m["alpha_id"]) for m in members]
-        days = await self.alphas.daily_pnl(ids)
-        self._pool = {a: s for a in ids if (s := _windowed(days.get(a, {}))) is not None}
+        # A new submission changes the pool at once; the TTL only spares rereading the same one.
+        if set(ids) == self._pool_ids and time.monotonic() - self._pool_read < POOL_TTL:
+            return self._pool
+        self._pool = pool_series(await self.alphas.daily_pnl(ids))
+        self._pool_ids = set(ids)
         self._pool_read = time.monotonic()
         self.bus.set_stat("families", "pool alphas compared", len(self._pool))
         return self._pool
@@ -266,5 +282,5 @@ class FamilyClerk:
                 ).all()
             )
         days = await self.alphas.daily_pnl(ids)
-        self._leaders = {a: s for a in ids if (s := _windowed(days.get(a, {}))) is not None}
+        self._leaders = {a: s for a in ids if (s := windowed(days.get(a, {}))) is not None}
         self._leaders_loaded = True

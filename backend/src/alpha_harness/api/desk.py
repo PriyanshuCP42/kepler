@@ -25,7 +25,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 
-from ..agents import guard
+from ..agents import families, guard
 from ..agents import themes as power_route
 from ..agents.crowding import PROD_TARGET
 from ..agents.repair import BY_ID as REPAIR_MOVES
@@ -445,8 +445,12 @@ def fix_for(submission: SubmissionCheck | None, power_pool: bool, repaired: bool
     )
 
 
-#: BRAIN reports Sharpe to two decimals: a fall of less than this is rounding, not harm.
+#: BRAIN reports Sharpe and Fitness to two decimals: a fall of less than this is rounding.
 BRAIN_SHARPE_SLACK = 0.01
+BRAIN_FITNESS_SLACK = 0.01
+#: The group's margin after joining must stay at least this, in basis points, once it falls:
+#: under it, trading costs eat the edge.
+MIN_GROUP_MARGIN_BPS = 5.0
 _BEFORE_AFTER = "before_after:"
 
 
@@ -485,17 +489,74 @@ class BrainComparison:
                 bits.append(f"{label} {b:.2f} → {a:.2f}")
         return ", ".join(bits)
 
+    def _pair(self, key: str) -> tuple[float, float] | None:
+        b, a = self.before.get(key), self.after.get(key)
+        if isinstance(b, int | float) and isinstance(a, int | float):
+            return float(b), float(a)
+        return None
+
+    @property
+    def harms(self) -> list[str]:
+        """What it makes worse that the Desk will not accept: Sharpe or Fitness down, or the
+        margin falling under :data:`MIN_GROUP_MARGIN_BPS`."""
+        found: list[str] = []
+        if (sharpe := self._pair("sharpe")) and sharpe[1] < sharpe[0] - BRAIN_SHARPE_SLACK:
+            found.append("Sharpe falls")
+        if (fitness := self._pair("fitness")) and fitness[1] < fitness[0] - BRAIN_FITNESS_SLACK:
+            found.append("Fitness falls")
+        margin = self._pair("margin")
+        if margin and margin[1] < margin[0] and margin[1] * 1e4 < MIN_GROUP_MARGIN_BPS:
+            found.append(f"margin falls under {MIN_GROUP_MARGIN_BPS:g} bps")
+        return found
+
     @property
     def lowers(self) -> bool:
-        b, a = self.before.get("sharpe"), self.after.get("sharpe")
-        return (
-            isinstance(b, int | float) and isinstance(a, int | float) and a < b - BRAIN_SHARPE_SLACK
-        )
+        return bool(self.harms)
 
     @property
     def text(self) -> str:
-        verdict = "lowers" if self.lowers else "lifts"
-        return f"BRAIN's own comparison: it {verdict} your {self.group} alphas ({self._moves()})."
+        if self.harms:
+            return (
+                f"BRAIN's own comparison: it lowers your {self.group} alphas "
+                f"({' and '.join(self.harms)}: {self._moves()})."
+            )
+        return f"BRAIN's own comparison: it lifts your {self.group} alphas ({self._moves()})."
+
+
+def _num(value: Any) -> float | None:
+    return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else None
+
+
+#: BRAIN's self-correlation exception: an Alpha over the ceiling passes when its Sharpe is
+#: this much greater than every submitted Alpha it moves with.
+SHARPER_BY = 1.1
+
+
+def binding_correlation(
+    days: dict[date, float] | None,
+    sharpe: float | None,
+    pool: dict[str, families.Series],
+    sharpes: dict[str, float | None],
+) -> float | None:
+    """The correlation with your submitted Alphas that BRAIN's self-correlation test holds this
+    Alpha to: the highest, unless every one over the ceiling is beaten by 10% on Sharpe, in
+    which case the highest under it. Measured now, against the pool as it is today."""
+    series = families.windowed(days or {})
+    if series is None:
+        return None
+    rhos = {m: rho for m, other in pool.items() if (rho := families.correlation(series, other))}
+    if not rhos:
+        return None
+
+    def beaten(member: str) -> bool:
+        theirs = sharpes.get(member)
+        return sharpe is not None and theirs is not None and sharpe >= SHARPER_BY * theirs
+
+    over = [rho for m, rho in rhos.items() if rho >= SELF_CORRELATION_CEILING and not beaten(m)]
+    if over:
+        return max(over)
+    under = [rho for rho in rhos.values() if rho < SELF_CORRELATION_CEILING]
+    return max(under) if under else None
 
 
 def comparison_of(body: dict[str, Any] | None) -> BrainComparison | None:
@@ -760,6 +821,21 @@ async def desk(state: State) -> Desk:
     ids = [*scopes[WHOLE], *joins]
     series = await state.alphas.series(ids)
     meta = await state.alphas.by_ids(scopes[WHOLE]) | stored
+    # Against the pool as it is now: the Family Clerk measured each candidate once, maybe
+    # before your latest submissions, which BRAIN's self-correlation test counts.
+    pool_now = families.pool_series(
+        {m: {d: v[0] for d, v in series.get(m, {}).items()} for m in scopes[WHOLE]}
+    )
+    member_sharpes = {m: _num(meta.get(m, {}).get("sharpe")) for m in scopes[WHOLE]}
+    live_pool = {
+        v.alpha_id: binding_correlation(
+            {d: x[0] for d, x in series.get(v.alpha_id, {}).items()},
+            _num(stored[v.alpha_id].get("sharpe")),
+            pool_now,
+            member_sharpes,
+        )
+        for v in chosen
+    }
     effects = await asyncio.to_thread(
         portfolio.what_if, series, meta, scopes, joins, guard.RECENT_START
     )
@@ -858,7 +934,7 @@ async def desk(state: State) -> Desk:
         )
         readiness, reasons = judge(
             prod.get(v.alpha_id),
-            v.pool_correlation,
+            live_pool.get(v.alpha_id) or v.pool_correlation,
             found,
             view,
             row.get("test_sharpe"),
@@ -879,7 +955,7 @@ async def desk(state: State) -> Desk:
                 fitness=row.get("fitness"),
                 train_sharpe=row.get("train_sharpe"),
                 test_sharpe=row.get("test_sharpe"),
-                pool_correlation=v.pool_correlation,
+                pool_correlation=live_pool.get(v.alpha_id) or v.pool_correlation,
                 prod_correlation=prod.get(v.alpha_id),
                 effects=found,
                 guard=view,
