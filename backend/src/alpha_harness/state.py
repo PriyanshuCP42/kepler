@@ -24,6 +24,7 @@ from .agents.families import FamilyClerk
 from .agents.genius import GeniusSync
 from .agents.guard import Guard
 from .agents.hypothesis import HypothesisWriter
+from .agents.master import MasterTracker
 from .agents.overlap import Overlap
 from .agents.repair import RepairEngineer
 from .agents.screener import Screener
@@ -175,6 +176,7 @@ class AppState:
         self.genius = GeniusSync(self, self.agents)
         self.themes = Themes(self)
         self.crowding = Crowding(self)
+        self.master = MasterTracker(self)
 
         self._renew_lock = asyncio.Lock()
         self._last_session_check = float("-inf")

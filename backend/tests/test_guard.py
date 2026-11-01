@@ -6,7 +6,9 @@ import pytest
 
 from alpha_harness.agents import guard
 from alpha_harness.agents.guard import NeighbourResult as N
-from alpha_harness.api.desk import WHOLE, Effect, Figures, GuardView, judge
+from alpha_harness.api.desk import WHOLE, BrainComparison, Effect, Figures, GuardView, judge
+
+LIFTS = BrainComparison("EQUITY:USA:1", {"sharpe": 2.0}, {"sharpe": 2.2})
 
 
 class TestNeighbours:
@@ -178,7 +180,7 @@ def _lifts() -> list[Effect]:
 
 class TestDeskVerdict:
     def test_robust_and_checked_is_ready(self):
-        assert judge(0.3, 0.2, _lifts(), _view(), 1.5)[0] == "ready"
+        assert judge(0.3, 0.2, _lifts(), _view(), 1.5, brain=LIFTS)[0] == "ready"
 
     def test_untested_waits_for_the_check(self):
         readiness, reasons = judge(0.3, 0.2, _lifts(), _view(status="untested"), 1.5)
@@ -248,7 +250,7 @@ class TestFadingVerdict:
 
     def test_holding_up_is_ready(self):
         view = _view(recent_sharpe=1.9, full_sharpe=2.0)
-        assert judge(0.3, 0.2, _lifts(), view, 1.5)[0] == "ready"
+        assert judge(0.3, 0.2, _lifts(), view, 1.5, brain=LIFTS)[0] == "ready"
 
     def test_lowering_the_pool_in_the_recent_years_hurts(self):
         fig = {"fitness": 1.0, "returns": 0.1, "drawdown": 0.05, "turnover": 0.2, "margin": 1e-3}

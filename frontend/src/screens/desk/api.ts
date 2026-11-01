@@ -182,6 +182,8 @@ export const desk = {
   get: () => http.get<Desk>('/api/desk'),
   /** Asks BRAIN for every missing Production Correlation, as a background job. */
   checkProd: () => http.post<{ taskId: string }>('/api/desk/prod-correlation'),
+  /** BRAIN's own before-and-after comparison for every candidate that could be Ready. */
+  compare: () => http.post<{ taskId: string }>('/api/desk/brain-comparison'),
   /** Runs BRAIN's submission check on every Ready or Check First candidate not checked yet. */
   submissionCheck: () => http.post<{ taskId: string }>('/api/desk/submission-check'),
   /** One repair round for this candidate alone, when the rules call it fixable. */

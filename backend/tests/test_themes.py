@@ -4,7 +4,7 @@ import json
 
 from alpha_harness.agents import themes
 from alpha_harness.agents.repair import _outcome
-from alpha_harness.api.desk import PowerPoolRoute, judge
+from alpha_harness.api.desk import BrainComparison, PowerPoolRoute, judge
 from alpha_harness.db.models import Trial, TrialState
 
 THEMES_CHECK = {
@@ -69,7 +69,8 @@ def test_the_desk_holds_an_off_theme_alpha():
 
 def test_a_theme_market_alpha_is_told_to_add_its_description():
     route = PowerPoolRoute(missed=["LOW_SHARPE"], theme="GLB/D1 Power Pool Nov'26")
-    readiness, reasons = judge(0.3, 0.2, [], None, 1.5, None, route)
+    lifts = BrainComparison("EQUITY:USA:1", {"sharpe": 2.0}, {"sharpe": 2.2})
+    readiness, reasons = judge(0.3, 0.2, [], None, 1.5, None, route, lifts)
     assert readiness == "ready"
     assert any("description" in r for r in reasons)
 

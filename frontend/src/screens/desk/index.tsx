@@ -64,17 +64,17 @@ const READINESS: Record<Readiness, { label: string; tone: Tone; note: string }> 
   ready: {
     label: 'Ready',
     tone: 'profit',
-    note: 'Passes every test here and lifts your pool. Run Check Submission as the last step.',
+    note: "Passes every test here, and BRAIN's own comparison says it lifts its group. Run Check Submission as the last step.",
   },
   check: {
     label: 'Check First',
     tone: 'warn',
-    note: 'Lifts your pool; Production Correlation or the neighbour check still to run.',
+    note: "Lifts your pool; Production Correlation, the neighbour check or BRAIN's comparison still to run.",
   },
   hurts: {
     label: 'Lowers Pool',
     tone: 'muted',
-    note: 'Would lower the combined Sharpe of your pool or its partition.',
+    note: "Would lower the combined Sharpe of your pool, or BRAIN's own comparison says it lowers its group.",
   },
   fading: {
     label: 'Fading',
@@ -111,6 +111,15 @@ export function DeskScreen() {
     onSuccess: () =>
       toast.success('Asking BRAIN for Production Correlation', {
         description: 'BRAIN limits these per hour, so it runs in the background. No quota used.',
+      }),
+    onError: (error) => toast.error(errorMessage(error)),
+  })
+  const compare = useMutation({
+    mutationFn: desk.compare,
+    onSuccess: () =>
+      toast.success('Asking BRAIN for its before-and-after comparison', {
+        description:
+          'The same Performance Comparison its Alpha page shows. An alpha it says lowers its group is never Ready. No quota used.',
       }),
     onError: (error) => toast.error(errorMessage(error)),
   })
@@ -156,6 +165,13 @@ export function DeskScreen() {
       (c) => c.guard.status === 'untested' && (c.readiness === 'ready' || c.readiness === 'check'),
     ).length ?? 0
   const missing = data?.candidates.filter((c) => c.prodCorrelation === null).length ?? 0
+  const uncompared =
+    data?.candidates.filter(
+      (c) =>
+        (c.readiness === 'ready' || c.readiness === 'check') &&
+        c.prodCorrelation !== null &&
+        !c.reasons.some((r) => r.startsWith("BRAIN's own comparison")),
+    ).length ?? 0
 
   return (
     <Page>
@@ -199,6 +215,12 @@ export function DeskScreen() {
                   icon: <ShieldCheckIcon />,
                   disabled: !missing || check.isPending,
                   onClick: () => check.mutate(),
+                },
+                {
+                  label: `Run BRAIN comparison${uncompared ? ` (${uncompared})` : ''}`,
+                  icon: <ShieldCheckIcon />,
+                  disabled: !uncompared || compare.isPending,
+                  onClick: () => compare.mutate(),
                 },
                 {
                   label: 'Refresh',

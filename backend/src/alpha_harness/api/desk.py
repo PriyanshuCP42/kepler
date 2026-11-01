@@ -16,10 +16,11 @@ Then a verdict: ready, check first, or blocked. Submitting stays a click on BRAI
 """
 
 import asyncio
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import date
 from typing import Any, Literal
 
+import structlog
 from fastapi import APIRouter
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
@@ -35,7 +36,7 @@ from ..brain.platform import (
     PYRAMID_MIN_ALPHAS,
     SELF_CORRELATION_CEILING,
 )
-from ..db.models import BrainCache, CriticVerdict, RepairAttempt
+from ..db.models import BrainCache, CriticVerdict, RepairAttempt, utcnow
 from ..labs.fastexpr import ParseError, data_fields, parse
 from ..schemas import Out
 from ..tools import portfolio, power_pool
@@ -45,6 +46,7 @@ from .deps import State, refuse
 from .lab_tasks import AlphaIds, WorkflowStarted, check_prod_correlation, prod_correlations
 
 router = APIRouter(prefix="/api/desk", tags=["desk"])
+log = structlog.get_logger(__name__)
 
 #: Candidates the desk weighs, best Critic score first.
 CANDIDATES = 40
@@ -443,6 +445,67 @@ def fix_for(submission: SubmissionCheck | None, power_pool: bool, repaired: bool
     )
 
 
+#: BRAIN reports Sharpe to two decimals: a fall of less than this is rounding, not harm.
+BRAIN_SHARPE_SLACK = 0.01
+_BEFORE_AFTER = "before_after:"
+
+
+@dataclass(frozen=True, slots=True)
+class BrainComparison:
+    """BRAIN's own before-and-after: its Performance Comparison for the group the Alpha joins
+    (region and delay, or their Power Pool), the same figures its Alpha page shows."""
+
+    partition: str
+    before: dict[str, Any]
+    after: dict[str, Any]
+
+    @property
+    def group(self) -> str:
+        parts = self.partition.split(":")[1:]
+        return " ".join(p if i != 1 else f"D{p}" for i, p in enumerate(parts) if p).replace(
+            "POWER_POOL", "Power Pool"
+        )
+
+    def _moves(self) -> str:
+        bits = []
+        for key, label, pct in (
+            ("sharpe", "Sharpe", False),
+            ("fitness", "Fitness", False),
+            ("drawdown", "drawdown", True),
+            ("margin", "margin", None),
+        ):
+            b, a = self.before.get(key), self.after.get(key)
+            if not isinstance(b, int | float) or not isinstance(a, int | float):
+                continue
+            if pct is None:
+                bits.append(f"{label} {b * 1e4:.1f} → {a * 1e4:.1f} bps")
+            elif pct:
+                bits.append(f"{label} {b:.2%} → {a:.2%}")
+            else:
+                bits.append(f"{label} {b:.2f} → {a:.2f}")
+        return ", ".join(bits)
+
+    @property
+    def lowers(self) -> bool:
+        b, a = self.before.get("sharpe"), self.after.get("sharpe")
+        return (
+            isinstance(b, int | float) and isinstance(a, int | float) and a < b - BRAIN_SHARPE_SLACK
+        )
+
+    @property
+    def text(self) -> str:
+        verdict = "lowers" if self.lowers else "lifts"
+        return f"BRAIN's own comparison: it {verdict} your {self.group} alphas ({self._moves()})."
+
+
+def comparison_of(body: dict[str, Any] | None) -> BrainComparison | None:
+    body = body or {}
+    stats = body.get("stats") or {}
+    if not isinstance(stats.get("before"), dict) or not isinstance(stats.get("after"), dict):
+        return None
+    return BrainComparison(str(body.get("partitionName") or ""), stats["before"], stats["after"])
+
+
 def judge(
     prod: float | None,
     pool: float | None,
@@ -451,9 +514,14 @@ def judge(
     test_sharpe: float | None = None,
     submission: SubmissionCheck | None = None,
     route: PowerPoolRoute | None = None,
+    brain: BrainComparison | None = None,
 ) -> tuple[Readiness, list[str]]:
     """Ready, check first, lowers the pool, fading, overfit, fails BRAIN's submission check, or
-    blocked, with why."""
+    blocked, with why.
+
+    BRAIN's own before-and-after is the last word: an Alpha it says lowers the group it joins
+    is never Ready, whatever Kepler's estimate says, and none is Ready until it has been asked.
+    """
     if prod is not None and prod >= PROD_CORRELATION_CEILING:
         return "blocked", [
             f"Production Correlation {prod:.2f} is over BRAIN's {PROD_CORRELATION_CEILING}."
@@ -511,9 +579,15 @@ def judge(
     dying = fading(view) if view is not None else []
     if dying:
         return "fading", [*dying, *reasons]
+    if brain is not None and brain.lowers:
+        return "hurts", [brain.text, *reasons]
     if hurts:
         return "hurts", reasons
+    if brain is not None:
+        reasons.insert(0, brain.text)
     pending = [] if prod is not None else ["Production Correlation not checked yet."]
+    if brain is None:
+        pending.append("BRAIN's own before-and-after comparison not run yet.")
     theme_note = (
         [
             f"Pure Power Pool in this month's {route.theme} theme: submit it with a Power Pool "
@@ -718,6 +792,7 @@ async def desk(state: State) -> Desk:
             )
         }
     prod = await prod_correlations(state, list(checks), checks)
+    compared = await _comparisons(state, list(checks), len(scopes[WHOLE]))
     categories, niches = await _pyramids(state)
 
     repair_moves = {key: move.name for key, move in REPAIR_MOVES.items()}
@@ -789,6 +864,7 @@ async def desk(state: State) -> Desk:
             row.get("test_sharpe"),
             submission,
             route,
+            compared.get(v.alpha_id),
         )
         out.append(
             Candidate(
@@ -934,6 +1010,81 @@ def sharpe_change(effects: list[Effect], scope: str, *, recent: bool = False) ->
         if e.scope == scope and before is not None and after is not None:
             return after - before
     return None
+
+
+async def _comparisons(
+    state: Any, alpha_ids: list[str], submitted: int
+) -> dict[str, BrainComparison]:
+    """BRAIN's before-and-after for each Alpha that has one taken against the pool as it is: one
+    taken before your last submission compared it with a pool that has since changed."""
+    async with state.db.session() as session:
+        rows = await session.scalars(
+            select(BrainCache).where(BrainCache.key.in_([f"{_BEFORE_AFTER}{a}" for a in alpha_ids]))
+        )
+        found: dict[str, BrainComparison] = {}
+        for row in rows:
+            body = row.body or {}
+            if body.get("submitted") != submitted:
+                continue
+            if (comparison := comparison_of(body)) is not None:
+                found[row.key.removeprefix(_BEFORE_AFTER)] = comparison
+        return found
+
+
+@router.post("/brain-comparison", status_code=202)
+async def compare_candidates(state: State) -> WorkflowStarted:
+    """Ask BRAIN for its before-and-after comparison of every candidate that could be Ready:
+    under the Production Correlation target and not ruled out otherwise. No simulation quota."""
+    found = await desk(state)
+    wanted = [
+        c.alpha_id
+        for c in found.candidates
+        if c.readiness in ("ready", "check")
+        and c.prod_correlation is not None
+        and not any(r.startswith("BRAIN's own comparison") for r in c.reasons)
+    ]
+    if not wanted:
+        raise refuse(
+            409,
+            "nothing_to_compare",
+            "No candidate is waiting for BRAIN's comparison: each needs its Production "
+            "Correlation first, under the target.",
+        )
+    submitted = found.submitted
+
+    async def work(task: Any) -> str:
+        done = failed = 0
+        for alpha_id in wanted:
+            await state.tasks.update(
+                task, progress=done / len(wanted), detail=f"{done} of {len(wanted)}"
+            )
+            try:
+                body = await state.endpoints.before_and_after(alpha_id)
+            except Exception as exc:  # noqa: BLE001 - one refusal must not abandon the rest
+                log.warning("brain_comparison.failed", alpha_id=alpha_id, error=str(exc))
+                failed += 1
+                continue
+            async with state.db.session() as session:
+                await session.merge(
+                    BrainCache(
+                        key=f"{_BEFORE_AFTER}{alpha_id}",
+                        body={
+                            "partitionName": body.get("partitionName"),
+                            "stats": body.get("stats"),
+                            "submitted": submitted,
+                        },
+                        fetched_at=utcnow(),
+                    )
+                )
+            done += 1
+        detail = f"BRAIN's comparison for {done} Alphas"
+        return detail + (f". BRAIN could not compare {failed}" if failed else "")
+
+    try:
+        started = await state.backfill.start_job("brain-comparison", "BRAIN comparison", work)
+    except RuntimeError as exc:
+        raise refuse(409, "already_running", str(exc)) from exc
+    return WorkflowStarted(task_id=started)
 
 
 @router.post("/prod-correlation", status_code=202)

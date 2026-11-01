@@ -980,6 +980,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/desk/brain-comparison": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Compare Candidates
+         * @description Ask BRAIN for its before-and-after comparison of every candidate that could be Ready:
+         *     under the Production Correlation target and not ruled out otherwise. No simulation quota.
+         */
+        post: operations["compare_candidates_api_desk_brain_comparison_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/desk/guard": {
         parameters: {
             query?: never;
@@ -1194,6 +1215,67 @@ export interface paths {
          * @description Store what your Genius page shows today. Any figure may be left out.
          */
         post: operations["add_api_genius_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/genius/level": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Level Plan
+         * @description Your figures this quarter against ``level``'s bars and the consultants already at it.
+         */
+        get: operations["level_plan_api_genius_level_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/genius/osmosis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Osmosis Plan
+         * @description Your Osmosis points as BRAIN holds them, and a valid allocation to propose. Reads only.
+         */
+        get: operations["osmosis_plan_api_genius_osmosis_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/genius/osmosis/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Osmosis Apply
+         * @description Set these scopes' Osmosis points on BRAIN as proposed: each Alpha whose points differ
+         *     is edited, those left out set to 0. Only on your click; never submits anything.
+         */
+        post: operations["osmosis_apply_api_genius_osmosis_apply_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4655,6 +4737,48 @@ export interface components {
             /** Vector */
             vector: number;
         };
+        /** LevelPlan */
+        LevelPlan: {
+            /** Bars */
+            bars: components["schemas"]["LevelRow"][];
+            /** Daysleft */
+            daysLeft: number;
+            /** Level */
+            level: string;
+            /** Pace */
+            pace: string[];
+            /** Peerscounted */
+            peersCounted: number;
+            /** Performancecutoff */
+            performanceCutoff: string;
+            /** Performances */
+            performances: {
+                [key: string]: number | null;
+            };
+            /** Quarterend */
+            quarterEnd: string;
+            /** Tiebreakers */
+            tieBreakers: components["schemas"]["LevelRow"][];
+        };
+        /** LevelRow */
+        LevelRow: {
+            /** Bar */
+            bar: number | null;
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Lowerbetter */
+            lowerBetter: boolean;
+            /** Met */
+            met: boolean | null;
+            /** Note */
+            note: string;
+            /** Peers */
+            peers: number | null;
+            /** You */
+            you: number | null;
+        };
         /**
          * Lineage
          * @description The near miss or refused alpha this one repairs, and the fix that made it.
@@ -4873,6 +4997,80 @@ export interface components {
             maxSimulations: number;
             /** Vector */
             vector: string[];
+        };
+        /** OsmosisApplied */
+        OsmosisApplied: {
+            /** Changed */
+            changed: number;
+            /** Failed */
+            failed: string[];
+            view: components["schemas"]["OsmosisView"];
+        };
+        /** OsmosisApply */
+        OsmosisApply: {
+            /** Scopes */
+            scopes: string[];
+        };
+        /** OsmosisPick */
+        OsmosisPick: {
+            /** Alphaid */
+            alphaId: string;
+            /** Current */
+            current: number;
+            /** Points */
+            points: number;
+            /** Reason */
+            reason: string;
+            /** Recentsharpe */
+            recentSharpe: number | null;
+            /** Role */
+            role: string;
+            /** Turnover */
+            turnover: number | null;
+        };
+        /** OsmosisScope */
+        OsmosisScope: {
+            /** Alphas */
+            alphas: number;
+            /** Currentalphas */
+            currentAlphas: number;
+            /** Currentpoints */
+            currentPoints: number;
+            /** Currentsharpe */
+            currentSharpe: number | null;
+            /** Currentlyvalid */
+            currentlyValid: boolean;
+            /** Delay */
+            delay: number;
+            /** Eligible */
+            eligible: boolean;
+            /** Picks */
+            picks: components["schemas"]["OsmosisPick"][];
+            /** Proposedsharpe */
+            proposedSharpe: number | null;
+            /** Region */
+            region: string;
+            /** Shortof */
+            shortOf: number;
+        };
+        /** OsmosisView */
+        OsmosisView: {
+            /** Advice */
+            advice: string[];
+            /** Eligible */
+            eligible: number;
+            /** Locksat */
+            locksAt: string;
+            /** Minalphas */
+            minAlphas: number;
+            /** Minscopes */
+            minScopes: number;
+            /** Points */
+            points: number;
+            /** Scopes */
+            scopes: components["schemas"]["OsmosisScope"][];
+            /** Validnow */
+            validNow: number;
         };
         /**
          * OutlineRequest
@@ -8462,6 +8660,26 @@ export interface operations {
             };
         };
     };
+    compare_candidates_api_desk_brain_comparison_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowStarted"];
+                };
+            };
+        };
+    };
     guard_task_api_desk_guard_post: {
         parameters: {
             query?: never;
@@ -8793,6 +9011,90 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GeniusView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    level_plan_api_genius_level_get: {
+        parameters: {
+            query?: {
+                level?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LevelPlan"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    osmosis_plan_api_genius_osmosis_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OsmosisView"];
+                };
+            };
+        };
+    };
+    osmosis_apply_api_genius_osmosis_apply_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OsmosisApply"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OsmosisApplied"];
                 };
             };
             /** @description Validation Error */

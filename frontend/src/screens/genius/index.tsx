@@ -11,19 +11,30 @@ import { toast } from 'sonner'
 import { errorMessage } from '@/api/http'
 import { cn } from '@/lib/cn'
 import { DASH, fmt, isNum } from '@/lib/format'
-import { type Bar, GENIUS_KEY, type GeniusView, geniusApi } from '@/screens/genius/api'
+import {
+  type Bar,
+  GENIUS_KEY,
+  type GeniusView,
+  geniusApi,
+  LEVEL_KEY,
+  type LevelRow,
+  OSMOSIS_KEY,
+  type OsmosisScope,
+} from '@/screens/genius/api'
 import {
   Button,
   Empty,
   ErrorNotice,
   Field,
   Input,
+  Notice,
   Page,
   PageHeader,
   Panel,
   Skeleton,
   TEXT_TONE,
 } from '@/ui/kit'
+import { Confirm } from '@/ui/overlay'
 
 export function GeniusScreen() {
   const queryClient = useQueryClient()
@@ -69,6 +80,8 @@ export function GeniusScreen() {
             <BarsPanel data={data} />
             <AddReading />
           </div>
+          <LevelPanel />
+          <OsmosisPanel />
           <AgreementPanel data={data} />
           <ReadingsPanel data={data} />
         </>
@@ -404,6 +417,244 @@ function ReadingsPanel({ data }: { data: GeniusView }) {
             </tbody>
           </table>
         </div>
+      )}
+    </Panel>
+  )
+}
+
+// ── Osmosis ─────────────────────────────────────────────────────────────────────────────
+
+const scopeName = (s: OsmosisScope) => `${s.region}/${s.delay}`
+
+function OsmosisPanel() {
+  const queryClient = useQueryClient()
+  const query = useQuery({ queryKey: OSMOSIS_KEY, queryFn: geniusApi.osmosis, retry: false })
+  const [target, setTarget] = useState<OsmosisScope | null>(null)
+  const apply = useMutation({
+    mutationFn: (scope: OsmosisScope) => geniusApi.applyOsmosis([scopeName(scope)]),
+    onSuccess: (done) => {
+      queryClient.setQueryData(OSMOSIS_KEY, done.view)
+      setTarget(null)
+      if (done.failed.length) {
+        toast.error(`${done.failed.length} Alphas were not updated on BRAIN`, {
+          description: done.failed.join(', '),
+        })
+      } else {
+        toast.success(`Osmosis points set on ${done.changed} Alphas`)
+      }
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  })
+  const data = query.data
+  const shown = data?.scopes.filter((s) => s.eligible || s.alphas >= 3) ?? []
+
+  return (
+    <Panel
+      title="Osmosis Allocation"
+      description={
+        data
+          ? `BRAIN needs ${data.minScopes} scopes, each exactly ${fmt.int(data.points)} points over at least ${data.minAlphas} Alphas. It locks every Sunday 23:59 US Eastern; next lock ${fmt.date(data.locksAt)}. The proposal keeps your strongest, least alike Alphas by their 2021–2023 Sharpe, which picked them, so read its Sharpe as in-sample.`
+          : 'Your Osmosis points on BRAIN against an allocation that is valid and stronger.'
+      }
+      bodyClassName="flex flex-col gap-3"
+    >
+      {query.isError ? (
+        <ErrorNotice error={query.error} title="Could not read your Osmosis points" />
+      ) : !data ? (
+        <Skeleton className="h-40" label="Reading your Osmosis points" />
+      ) : (
+        <>
+          <p className="text-body-compact text-ink-muted">
+            Valid scopes now:{' '}
+            <span
+              className={cn('num', TEXT_TONE[data.validNow >= data.minScopes ? 'profit' : 'loss'])}
+            >
+              {data.validNow} of {data.minScopes}
+            </span>{' '}
+            · scopes with enough Alphas: {data.eligible}
+          </p>
+          {data.advice.map((a) => (
+            <Notice key={a} tone="warn" title={a} />
+          ))}
+          <div className="overflow-x-auto">
+            <table className="w-full text-body-compact">
+              <thead>
+                <tr className="text-left text-caption text-ink-subtle">
+                  <th className="py-1.5 pr-3 font-medium">Scope</th>
+                  <th className="py-1.5 pr-3 text-right font-medium">Alphas</th>
+                  <th className="py-1.5 pr-3 font-medium">On BRAIN now</th>
+                  <th className="py-1.5 pr-3 text-right font-medium">Sharpe now</th>
+                  <th className="py-1.5 pr-3 text-right font-medium">Proposed</th>
+                  <th className="py-1.5 font-medium" />
+                </tr>
+              </thead>
+              <tbody>
+                {shown.map((s) => (
+                  <tr key={scopeName(s)} className="border-t border-hairline">
+                    <td className="num py-1.5 pr-3 text-ink">
+                      {s.region} D{s.delay}
+                    </td>
+                    <td className="num py-1.5 pr-3 text-right">{fmt.int(s.alphas)}</td>
+                    <td
+                      className={cn(
+                        'py-1.5 pr-3',
+                        TEXT_TONE[s.currentlyValid ? 'profit' : s.currentPoints ? 'loss' : 'muted'],
+                      )}
+                    >
+                      {s.currentPoints
+                        ? `${fmt.int(s.currentPoints)} points on ${s.currentAlphas} · ${s.currentlyValid ? 'valid' : 'not valid'}`
+                        : 'none'}
+                    </td>
+                    <td className="num py-1.5 pr-3 text-right text-ink-muted">
+                      {fmt.ratio(s.currentSharpe)}
+                    </td>
+                    <td className="num py-1.5 pr-3 text-right text-ink">
+                      {fmt.ratio(s.proposedSharpe)}
+                    </td>
+                    <td className="py-1.5 text-right">
+                      {s.eligible && s.picks.length ? (
+                        <Button size="sm" onClick={() => setTarget(s)}>
+                          Review and apply
+                        </Button>
+                      ) : (
+                        <span className="text-caption text-ink-subtle">
+                          {s.shortOf} more Alpha{s.shortOf === 1 ? '' : 's'} to submit
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+      <Confirm
+        open={target !== null}
+        onOpenChange={(open) => !open && !apply.isPending && setTarget(null)}
+        title={target ? `Set Osmosis points for ${target.region} D${target.delay}?` : ''}
+        confirmLabel="Set on BRAIN"
+        cancelLabel="Not now"
+        pending={apply.isPending}
+        onConfirm={() => target && apply.mutate(target)}
+      >
+        {target && (
+          <div className="flex flex-col gap-2">
+            <p>
+              Edits each Alpha whose points change on BRAIN, as its Submitted Alphas table does.
+              Nothing is submitted. Points as of Sunday night are the ones BRAIN uses.
+            </p>
+            <div className="max-h-72 overflow-y-auto">
+              <table className="w-full text-body-compact">
+                <thead>
+                  <tr className="text-left text-caption text-ink-subtle">
+                    <th className="py-1 pr-3 font-medium">Alpha</th>
+                    <th className="py-1 pr-3 text-right font-medium">Now</th>
+                    <th className="py-1 pr-3 text-right font-medium">Proposed</th>
+                    <th className="py-1 pr-3 text-right font-medium">2021–23 Sharpe</th>
+                    <th className="py-1 font-medium">Why</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {target.picks.map((p) => (
+                    <tr key={p.alphaId} className="border-t border-hairline">
+                      <td className="num py-1 pr-3">{p.alphaId}</td>
+                      <td className="num py-1 pr-3 text-right text-ink-muted">
+                        {fmt.int(p.current)}
+                      </td>
+                      <td className="num py-1 pr-3 text-right">{fmt.int(p.points)}</td>
+                      <td className="num py-1 pr-3 text-right">{fmt.ratio(p.recentSharpe)}</td>
+                      <td className="py-1 text-caption text-ink-subtle">
+                        {p.reason || (p.role === 'chosen' ? 'Strong and distinct' : '')}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </Confirm>
+    </Panel>
+  )
+}
+
+// ── Path to Master ──────────────────────────────────────────────────────────────────────
+
+const figure = (row: LevelRow, v: number | null) =>
+  !isNum(v) ? DASH : row.key === 'performance' || v % 1 ? fmt.ratio(v, 2) : fmt.int(v)
+
+function LevelTable({ rows, bar }: { rows: LevelRow[]; bar: boolean }) {
+  return (
+    <table className="w-full text-body-compact">
+      <thead>
+        <tr className="text-left text-caption text-ink-subtle">
+          <th className="py-1.5 pr-3 font-medium" />
+          <th className="py-1.5 pr-3 text-right font-medium">You</th>
+          {bar && <th className="py-1.5 pr-3 text-right font-medium">Bar</th>}
+          <th className="py-1.5 text-right font-medium">Master median</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr key={r.key} className="border-t border-hairline" title={r.note || undefined}>
+            <td className="py-1.5 pr-3 text-ink">
+              {r.label}
+              {r.lowerBetter && (
+                <span className="text-caption text-ink-subtle"> · lower is better</span>
+              )}
+            </td>
+            <td
+              className={cn(
+                'num py-1.5 pr-3 text-right',
+                TEXT_TONE[r.met === null ? 'muted' : r.met ? 'profit' : 'loss'],
+              )}
+            >
+              {figure(r, r.you)}
+            </td>
+            {bar && <td className="num py-1.5 pr-3 text-right text-ink">{figure(r, r.bar)}</td>}
+            <td className="num py-1.5 text-right text-ink-muted">{figure(r, r.peers)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
+function LevelPanel() {
+  const query = useQuery({ queryKey: LEVEL_KEY, queryFn: () => geniusApi.level(), retry: false })
+  const plan = query.data
+  return (
+    <Panel
+      title="Path to Master"
+      description={
+        plan
+          ? `${plan.daysLeft} days to ${fmt.date(plan.quarterEnd)}. All three bars must clear; then the tie-breaker decides among everyone who cleared them. Master median: the ${plan.peersCounted} Master consultants on BRAIN's leaderboard this quarter.`
+          : 'Your Genius figures this quarter against the Master bars and the consultants already there.'
+      }
+      bodyClassName="flex flex-col gap-4"
+    >
+      {query.isError ? (
+        <ErrorNotice error={query.error} title="Could not read your Genius figures" />
+      ) : !plan ? (
+        <Skeleton className="h-40" label="Reading BRAIN's leaderboard" />
+      ) : (
+        <>
+          <div className="grid gap-4 xl:grid-cols-2">
+            <LevelTable rows={plan.bars} bar />
+            <LevelTable rows={plan.tieBreakers} bar={false} />
+          </div>
+          <p className="text-caption text-ink-subtle">
+            Combined performances:{' '}
+            {Object.entries(plan.performances)
+              .map(([k, v]) => `${k} ${fmt.ratio(v)}`)
+              .join(' · ')}
+            . The best one counts.
+          </p>
+          {plan.pace.map((p) => (
+            <Notice key={p} tone="info" title={p} />
+          ))}
+        </>
       )}
     </Panel>
   )

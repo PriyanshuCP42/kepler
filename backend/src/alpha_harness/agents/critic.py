@@ -63,8 +63,14 @@ NEAR = 0.25
 #: Failing checks a near miss may have.
 NEAR_FAILURES = 2
 
-#: Score weights. Starting guesses, to be refit against BRAIN's performance bars.
-WEIGHTS = {"robust": 0.45, "decay": 0.25, "fitness": 0.2, "simplicity": 0.1}
+#: Score weights. Starting guesses, to be refit against BRAIN's performance bars. Simplicity
+#: weighs more than it did: Genius breaks ties on fewer distinct operators and fields per Alpha,
+#: and BRAIN's own advice is to strip what does not drive performance.
+WEIGHTS = {"robust": 0.40, "decay": 0.25, "fitness": 0.2, "simplicity": 0.15}
+#: Operators at which simplicity is full, and the count past it at which it is spent:
+#: Master consultants average about 3.6 distinct operators per Alpha.
+SIMPLE_OPERATORS = 2
+SIMPLICITY_SPAN = 6
 
 #: The columns :func:`judge` reads, so a page of the vault reads nothing more.
 COLUMNS = (
@@ -218,7 +224,7 @@ def judge(row: dict[str, Any]) -> Judgement:
         "robust": _clip(robust / 2.5),
         "decay": _clip(ratio) if ratio is not None else 0.5,
         "fitness": _clip(fitness / 2.0),
-        "simplicity": _clip(1 - ((ops or 5) - 2) / 10),
+        "simplicity": _clip(1 - ((ops or 5) - SIMPLE_OPERATORS) / SIMPLICITY_SPAN),
     }
     score = round(100 * sum(WEIGHTS[k] * v for k, v in parts.items()), 1)
 
@@ -270,7 +276,7 @@ def search_score(row: dict[str, Any], overlap: float = 0.0) -> float | None:
     parts = {
         "robust": _clip(robust / 2.5),
         "fitness": _clip(fitness / 2.0),
-        "simplicity": _clip(1 - ((ops or 5) - 2) / 10),
+        "simplicity": _clip(1 - ((ops or 5) - SIMPLE_OPERATORS) / SIMPLICITY_SPAN),
     }
     weight = sum(WEIGHTS[k] for k in parts)
     score = 100 * sum(WEIGHTS[k] * v for k, v in parts.items()) / weight

@@ -5,7 +5,15 @@ from datetime import date, timedelta
 import numpy as np
 import pytest
 
-from alpha_harness.api.desk import WHOLE, Effect, Figures, judge, sharpe_change
+from alpha_harness.api.desk import (
+    WHOLE,
+    BrainComparison,
+    Effect,
+    Figures,
+    comparison_of,
+    judge,
+    sharpe_change,
+)
 from alpha_harness.tools import portfolio
 
 
@@ -13,6 +21,17 @@ def _series(seed: int, days: int = 300, drift: float = 1.0):
     rng = np.random.default_rng(seed)
     start = date(2022, 1, 3)
     return {start + timedelta(days=i): (float(drift + rng.normal(0, 10)), 0.1) for i in range(days)}
+
+
+def _brain(before: float, after: float) -> BrainComparison:
+    return BrainComparison(
+        "EQUITY:ASI:1",
+        {"sharpe": before, "fitness": 2.0, "drawdown": 0.02, "margin": 5e-4},
+        {"sharpe": after, "fitness": 2.1, "drawdown": 0.018, "margin": 5.2e-4},
+    )
+
+
+LIFTS = _brain(4.45, 4.82)
 
 
 def _figures(sharpe: float | None) -> Figures:
@@ -63,15 +82,39 @@ class TestVerdict:
         partition = Effect(
             scope="EUR · D1 · Power Pool", members=1, before=_figures(1.2), after=_figures(1.0)
         )
-        assert judge(0.3, 0.2, [*self._lifts(), partition])[0] == "ready"
+        assert judge(0.3, 0.2, [*self._lifts(), partition], brain=LIFTS)[0] == "ready"
 
     def test_unchecked_production_correlation_is_checked_first(self):
         assert judge(None, 0.2, self._lifts())[0] == "check"
 
     def test_checked_and_lifting_is_ready(self):
-        readiness, reasons = judge(0.4, 0.2, self._lifts())
+        readiness, reasons = judge(0.4, 0.2, self._lifts(), brain=LIFTS)
         assert readiness == "ready"
+        assert reasons[0].startswith("Production Correlation")
         assert any("1.00 → 1.20" in r for r in reasons)
+        assert any("lifts your ASI D1 alphas (Sharpe 4.45 → 4.82" in r for r in reasons)
+
+    def test_nothing_is_ready_before_brain_compares_it(self):
+        readiness, reasons = judge(0.4, 0.2, self._lifts())
+        assert readiness == "check"
+        assert "before-and-after comparison not run yet" in reasons[0]
+
+    def test_brain_saying_it_lowers_the_group_overrules_the_estimate(self):
+        readiness, reasons = judge(0.4, 0.2, self._lifts(), brain=_brain(4.45, 3.80))
+        assert readiness == "hurts"
+        assert reasons[0].startswith("BRAIN's own comparison: it lowers your ASI D1 alphas")
+
+    def test_a_rounding_sized_fall_is_not_harm(self):
+        assert judge(0.4, 0.2, self._lifts(), brain=_brain(3.80, 3.795))[0] == "ready"
+
+    def test_comparison_reads_brains_body_and_names_the_group(self):
+        body = {
+            "partitionName": "EQUITY:ASI:1:POWER_POOL",
+            "stats": {"before": {"sharpe": 4.45}, "after": {"sharpe": 4.82}},
+        }
+        found = comparison_of(body)
+        assert found is not None and found.group == "ASI D1 Power Pool"
+        assert comparison_of({"stats": {}}) is None
 
     def test_sharpe_change(self):
         assert sharpe_change(self._lifts(1.0, 1.25), WHOLE) == pytest.approx(0.25)
@@ -183,7 +226,7 @@ class TestSubmissionCheck:
         from alpha_harness.api.desk import submission_of
 
         unchecked = submission_of(None, None, [LOW_SHARPE_WARN])
-        readiness, reasons = judge(0.3, 0.2, [], None, 1.5, unchecked)
+        readiness, reasons = judge(0.3, 0.2, [], None, 1.5, unchecked, brain=LIFTS)
         assert readiness == "ready"
         assert any("run Check Submission" in r for r in reasons)
 
@@ -191,7 +234,7 @@ class TestSubmissionCheck:
         from alpha_harness.api.desk import submission_of
 
         unchecked = submission_of(None, None, [FITNESS_PASS])
-        readiness, reasons = judge(0.3, 0.2, [], None, 1.5, unchecked)
+        readiness, reasons = judge(0.3, 0.2, [], None, 1.5, unchecked, brain=LIFTS)
         assert readiness == "ready"
         assert not any("Check Submission" in r for r in reasons)
 

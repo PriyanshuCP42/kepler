@@ -285,6 +285,32 @@ class BrainEndpoints:
         r = await self.client.request("GET", "/users/self/consultant/summary")
         return r.body if isinstance(r.body, dict) else {}
 
+    async def genius_board(self, limit: int, offset: int) -> list[dict[str, Any]]:
+        """One page of BRAIN's Genius leaderboard: each consultant's level, signals, pyramids,
+        performances and tie-breaker figures this quarter."""
+        r = await self.client.request(
+            "GET", f"/consultant/boards/genius?limit={limit}&offset={offset}"
+        )
+        body = r.body if isinstance(r.body, dict) else {}
+        return list(body.get("results") or [])
+
+    async def osmosis_points(self) -> dict[str, int]:
+        """Every submitted Alpha's Osmosis points, as BRAIN's Submitted Alphas table shows them."""
+        points: dict[str, int] = {}
+        offset = 0
+        while True:
+            r = await self.client.request(
+                "GET", f"/users/self/alphas?status=ACTIVE&limit=100&offset={offset}"
+            )
+            body = r.body if isinstance(r.body, dict) else {}
+            results = body.get("results") or []
+            for row in results:
+                value = row.get("osmosisPoints")
+                points[str(row.get("id"))] = int(value) if isinstance(value, int | float) else 0
+            offset += len(results)
+            if not results or offset >= int(body.get("count") or 0):
+                return points
+
     async def update_alpha(self, alpha_id: str, properties: dict[str, Any]) -> dict[str, Any]:
         """``PATCH /alphas/{id}``: name, category, color, tags, description. Never submits."""
         r = await self.client.request("PATCH", f"/alphas/{alpha_id}", json_body=properties)

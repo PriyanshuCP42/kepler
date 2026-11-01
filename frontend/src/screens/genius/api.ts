@@ -69,7 +69,74 @@ export interface NewReading {
   note: string | null
 }
 
+export interface OsmosisPick {
+  alphaId: string
+  points: number
+  current: number
+  recentSharpe: number | null
+  turnover: number | null
+  /** `chosen`, `filler` (makes up the ten) or `left_out`. */
+  role: 'chosen' | 'filler' | 'left_out'
+  reason: string
+}
+
+export interface OsmosisScope {
+  region: string
+  delay: number
+  alphas: number
+  eligible: boolean
+  shortOf: number
+  currentlyValid: boolean
+  currentPoints: number
+  currentAlphas: number
+  currentSharpe: number | null
+  proposedSharpe: number | null
+  picks: OsmosisPick[]
+}
+
+export interface OsmosisView {
+  locksAt: string
+  minScopes: number
+  minAlphas: number
+  points: number
+  validNow: number
+  eligible: number
+  scopes: OsmosisScope[]
+  advice: string[]
+}
+
+export interface OsmosisApplied {
+  changed: number
+  failed: string[]
+  view: OsmosisView
+}
+
+export interface LevelRow {
+  key: string
+  label: string
+  you: number | null
+  bar: number | null
+  peers: number | null
+  lowerBetter: boolean
+  met: boolean | null
+  note: string
+}
+
+export interface LevelPlan {
+  level: string
+  quarterEnd: string
+  daysLeft: number
+  performanceCutoff: string
+  bars: LevelRow[]
+  tieBreakers: LevelRow[]
+  performances: Record<string, number | null>
+  peersCounted: number
+  pace: string[]
+}
+
 export const GENIUS_KEY = ['genius'] as const
+export const LEVEL_KEY = ['genius', 'level'] as const
+export const OSMOSIS_KEY = ['genius', 'osmosis'] as const
 
 export const geniusApi = {
   get: () => http.get<GeniusView>('/api/genius'),
@@ -77,4 +144,11 @@ export const geniusApi = {
   /** Reads your Genius figures from BRAIN now, as today's reading. */
   sync: () => http.post<GeniusView>('/api/genius/sync'),
   remove: (id: number) => http.del<GeniusView>(`/api/genius/${id}`),
+  /** Your figures this quarter against a level's bars and the consultants already at it. */
+  level: (level = 'Master') => http.get<LevelPlan>(`/api/genius/level?level=${level}`),
+  /** Your Osmosis points as BRAIN holds them, and a valid allocation to propose. Reads only. */
+  osmosis: () => http.get<OsmosisView>('/api/genius/osmosis'),
+  /** Writes the proposal for these scopes (`REGION/DELAY`) to BRAIN. */
+  applyOsmosis: (scopes: string[]) =>
+    http.post<OsmosisApplied>('/api/genius/osmosis/apply', { scopes }),
 }
