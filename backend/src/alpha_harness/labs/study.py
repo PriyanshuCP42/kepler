@@ -21,7 +21,7 @@ separately, so trials stay joinable to the simulations that produced them.
 import asyncio
 import contextlib
 from datetime import timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import structlog
 from sqlalchemy import func, select, update
@@ -41,7 +41,7 @@ from ..db.models import (
     utcnow,
 )
 from ..vault.yields import checks_of, clean, gating_results, limits_of, verdict
-from . import distributions, probe, scheduler
+from . import distributions, probe, quality, scheduler
 from . import objectives as obj
 from .objectives import StudyNotFoundError
 from .params import SEARCH_SAMPLER, TASK_SAMPLERS, TEMPLATE_SAMPLER, SearchParams, params_of
@@ -73,6 +73,10 @@ VAULT_STATS = frozenset(
 )
 #: How long a finished Alpha may take to reach the local store before BRAIN is asked.
 VAULT_WAIT = timedelta(minutes=5)
+#: What a quality task reads off each result before its PnL: the cheap constraints' inputs.
+QUALITY_READ = ("train_sharpe", "train_fitness")
+#: Longest one feasible trial's PnL read may take before it is scored without its curve.
+PNL_SECONDS = 45.0
 
 
 class Optimizer:
@@ -104,6 +108,9 @@ class Optimizer:
         self.screener: Screener | None = None
         #: Set by the app: what the Critic Score charges for repeating your pool.
         self.overlap: Overlap | None = None
+        #: Set by the app: your submitted pool's daily PnL, which a quality search holds its
+        #: candidates' correlation to (:mod:`.quality`).
+        self.pool: Callable[[], Awaitable[dict[str, Any]]] | None = None
         self.studies: dict[int, optuna.Study] = {}
         #: Live Optuna trial objects for the round in flight, keyed study -> our trial
         #: number. Lost on restart, which :func:`_tell_many` handles by replaying.
@@ -234,7 +241,7 @@ class Optimizer:
             if not probe.due(row.sampler_params or {}, row.max_trials, len(finished)):
                 return False
         stored = await self.alphas.by_ids([a for a in finished if a])
-        found = probe.judge(list(stored.values()))
+        found = probe.judge(list(stored.values()), probe.trials_for(row.max_trials))
         if found is None:
             return False
         async with self.db.session() as session:
@@ -326,8 +333,11 @@ class Optimizer:
             }
 
         objective_list = obj.resolve(list(row.objectives or []))
+        graded = quality.is_quality(list(row.objectives or []))
+        # A quality task reads what its cheap constraints need here, and its curve after.
+        read = obj.resolve(list(QUALITY_READ)) if graded else objective_list
         saved: dict[str, dict[str, Any]] = {}
-        if all(o.key in VAULT_STATS for o in objective_list):
+        if all(o.key in VAULT_STATS for o in read):
             wanted = [
                 (
                     records[t.simulation_record_id].alpha_id
@@ -391,11 +401,7 @@ class Optimizer:
             stored_alpha = saved.get(alpha_id)
             # Every objective, not just Sharpe: a row stored without its train block has
             # Sharpe but no Train Fitness, and scoring it would fail the trial for good.
-            values = (
-                None
-                if stored_alpha is None
-                else row_values(stored_alpha, objective_list, self.overlap)
-            )
+            values = None if stored_alpha is None else row_values(stored_alpha, read, self.overlap)
             if stored_alpha is not None and values is not None:
                 summary = vault_summary(stored_alpha)
                 finished.append((live.get(trial.number), trial, values, summary))
@@ -429,11 +435,11 @@ class Optimizer:
                 )
                 continue
 
-            extra = obj.train_extra(alpha, objective_list)
+            extra = obj.train_extra(alpha, read)
             summary = obj.summarise(alpha)
-            if any(o.key == obj.CRITIC for o in objective_list):
+            if any(o.key == obj.CRITIC for o in read):
                 extra[obj.CRITIC] = critic_score(obj.alpha_row(alpha, summary), self.overlap)
-            values = obj.extract(alpha.in_sample, objective_list, extra)
+            values = obj.extract(alpha.in_sample, read, extra)
             finished.append((live.get(trial.number), trial, values, summary))
 
         if started:
@@ -442,6 +448,8 @@ class Optimizer:
             await self._close_unsent(study_id, row.sampler, unsent)
         if not finished:
             return 0
+        if graded:
+            finished = await self._graded(finished, saved)
 
         if tell:
             study = await self.optuna_study(study_id, row)
@@ -546,6 +554,72 @@ class Optimizer:
 
     # -- optuna ----------------------------------------------------------
 
+    async def _graded(
+        self,
+        finished: list[tuple[Any, Trial, list[float] | None, dict[str, Any]]],
+        saved: dict[str, dict[str, Any]],
+    ) -> list[tuple[Any, Trial, list[float] | None, dict[str, Any]]]:
+        """A quality task's trials with their objectives and constraints (:mod:`.quality`).
+
+        ``values`` arrive as :data:`QUALITY_READ`; a trial that clears the cheap constraints
+        has its daily PnL read for its train curve and its correlation with your pool.
+        """
+        from ..agents.families import closest
+
+        pool: dict[str, Any] | None = None
+        graded: list[tuple[Any, Trial, list[float] | None, dict[str, Any]]] = []
+        for live, trial, values, summary in finished:
+            if values is None:
+                graded.append((live, trial, values, summary))
+                continue
+            train_sharpe, train_fitness = values
+            checks = summary.get("checks") or []
+            margin = (summary.get("stats") or {}).get("margin")
+            cheap = quality.cheap_constraints(train_sharpe, margin, checks)
+            curve: tuple[float | None, float | None] = (None, None)
+            rho: float | None = None
+            alpha_id = summary.get("alphaId")
+            if alpha_id and all(c <= 0 for c in cheap):
+                days = await self._daily(alpha_id)
+                if days:
+                    stored = saved.get(alpha_id) or (await self.alphas.by_ids([alpha_id])).get(
+                        alpha_id
+                    )
+                    curve = quality.train_curve(days, (stored or {}).get("test_start"))
+                    if pool is None:
+                        pool = await self.pool() if self.pool is not None else {}
+                    worst = closest(days, pool) if pool else None
+                    rho = worst[1] if worst is not None else None
+            scored = quality.score(train_sharpe, train_fitness, margin, checks, curve, rho)
+            generation = _generation(live)
+            graded.append(
+                (
+                    live,
+                    trial,
+                    scored.values,
+                    {
+                        **summary,
+                        "quality": scored.detail,
+                        "constraints": scored.constraints,
+                        "generation": generation,
+                    },
+                )
+            )
+        return graded
+
+    async def _daily(self, alpha_id: str) -> dict[Any, float] | None:
+        """One Alpha's daily PnL from the store, read from BRAIN first when it lacks it."""
+        stored = (await self.alphas.daily_pnl([alpha_id])).get(alpha_id)
+        if stored or self.backfill is None:
+            return stored
+        try:
+            await asyncio.wait_for(self.backfill.fetch_pnl(alpha_id), PNL_SECONDS)
+        # Scored without its curve rather than holding the round: BRAIN may be slow or refuse.
+        except Exception:
+            log.info("optimize.pnl_unread", alpha_id=alpha_id, exc_info=True)
+            return None
+        return (await self.alphas.daily_pnl([alpha_id])).get(alpha_id)
+
     async def optuna_study(self, study_id: int, row: Study) -> optuna.Study:
         """The Optuna study, rebuilt from the trial rows on first use."""
         cached = self.studies.get(study_id)
@@ -556,7 +630,13 @@ class Optimizer:
             rows = (
                 (
                     await session.execute(
-                        select(Trial.params, Trial.distributions, Trial.values, Trial.state)
+                        select(
+                            Trial.params,
+                            Trial.distributions,
+                            Trial.values,
+                            Trial.state,
+                            Trial.result,
+                        )
                         .where(Trial.study_id == study_id)
                         .order_by(Trial.number)
                     )
@@ -564,7 +644,7 @@ class Optimizer:
                 .tuples()
                 .all()
             )
-            stored: list[dict[str, Any]] = [raw or {} for _, raw, _, _ in rows]
+            stored: list[dict[str, Any]] = [raw or {} for _, raw, _, _, _ in rows]
             bodies = await distributions.resolve(session, stored)
         history = [
             {
@@ -572,20 +652,16 @@ class Optimizer:
                 "distributions": distributions.unpack(raw, bodies),
                 "values": values,
                 "state": state,
+                "system": _system_attrs(result),
             }
-            for (params, _, values, state), raw in zip(rows, stored, strict=True)
+            for (params, _, values, state, result), raw in zip(rows, stored, strict=True)
         ]
 
-        from optuna.samplers import TPESampler
-
-        sampler = TPESampler(
-            n_startup_trials=params_of(row, SearchParams).n_startup_trials,
-            multivariate=True,
-            group=True,
-            constant_liar=row.batch_size > 1,
-        )
-        loader = _Distributions(scheduler.field_slots(row))
-        study = await asyncio.to_thread(_rebuild, sampler, history, loader)
+        slots = scheduler.field_slots(row)
+        sampler = _sampler(row, slots)
+        loader = _Distributions(slots)
+        directions = list(row.directions or ["maximize"])
+        study = await asyncio.to_thread(_rebuild, sampler, history, loader, directions)
         self.studies[study_id] = study
         return study
 
@@ -664,12 +740,15 @@ def _tell_many(
     from optuna.trial import TrialState as OptunaState
     from optuna.trial import create_trial
 
-    for optuna_trial, stored, values, _ in finished:
+    for optuna_trial, stored, values, summary in finished:
         try:
+            constraints = summary.get("constraints")
             if optuna_trial is not None:
                 if values is None:
                     study.tell(optuna_trial, state=OptunaState.FAIL, skip_if_finished=True)
                 else:
+                    for name, value in zip(quality.CONSTRAINTS, constraints or (), strict=False):
+                        optuna_trial.set_constraint(name, value)
                     study.tell(optuna_trial, values, skip_if_finished=True)
                 continue
 
@@ -687,6 +766,7 @@ def _tell_many(
                     distributions=distributions,
                     values=[float(v) for v in values],
                     state=OptunaState.COMPLETE,
+                    system_attrs=_system_attrs(summary) or None,
                 )
             )
         except Exception:
@@ -725,7 +805,62 @@ class _Distributions:
         return out
 
 
-def _rebuild(sampler: Any, history: list[dict[str, Any]], loader: _Distributions) -> optuna.Study:
+def _sampler(row: Study, slots: dict[str, tuple[str, ...]]) -> Any:
+    """Constrained NSGA-II for a quality task (:mod:`.quality`), TPE for every other."""
+    if quality.is_quality(list(row.objectives or [])):
+        from optuna.samplers import NSGAIISampler
+        from optuna.samplers.nsgaii import UniformCrossover
+
+        fields = len({f for choices in slots.values() for f in choices})
+        return NSGAIISampler(
+            population_size=quality.population(fields, row.max_trials),
+            crossover=UniformCrossover(quality.SWAPPING_PROB),
+            crossover_prob=quality.CROSSOVER_PROB,
+            mutation_prob=quality.MUTATION_PROB,
+            swapping_prob=quality.SWAPPING_PROB,
+        )
+    from optuna.samplers import TPESampler
+
+    return TPESampler(
+        n_startup_trials=params_of(row, SearchParams).n_startup_trials,
+        multivariate=True,
+        group=True,
+        constant_liar=row.batch_size > 1,
+    )
+
+
+def _generation(live: Any) -> int | None:
+    """The NSGA-II generation a live Optuna trial was drawn in, read as Optuna reads it."""
+    if live is None:
+        return None
+    attrs = live.storage.get_trial_system_attrs(live._trial_id)
+    return attrs.get(quality.GENERATION_KEY)
+
+
+def _feasible(trial: Trial) -> bool:
+    """Whether a quality trial meets every constraint; any other trial counts as meeting them."""
+    constraints = (trial.result or {}).get("constraints")
+    return not constraints or all(float(c) <= 0 for c in constraints)
+
+
+def _system_attrs(result: dict[str, Any] | None) -> dict[str, Any]:
+    """What a quality trial's sampler kept on it: its constraints and generation."""
+    if not result:
+        return {}
+    found: dict[str, Any] = {}
+    for name, value in zip(quality.CONSTRAINTS, result.get("constraints") or (), strict=False):
+        found[f"constraints:{name}"] = float(value)
+    if result.get("generation") is not None:
+        found[quality.GENERATION_KEY] = result["generation"]
+    return found
+
+
+def _rebuild(
+    sampler: Any,
+    history: list[dict[str, Any]],
+    loader: _Distributions,
+    directions: list[str] | None = None,
+) -> optuna.Study:
     """Recreate a study from its finished trials.
 
     Only terminal trials are replayed. Open ones are told later as replayed trials, so
@@ -736,7 +871,9 @@ def _rebuild(sampler: Any, history: list[dict[str, Any]], loader: _Distributions
     from optuna.trial import create_trial
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
-    study = optuna.create_study(direction="maximize", sampler=sampler)
+    # Every objective here is maximised: what a task stores names nothing else.
+    maximise: list[Literal["maximize"]] = ["maximize"] * max(1, len(directions or ()))
+    study = optuna.create_study(directions=maximise, sampler=sampler)
 
     state_map = {
         "COMPLETE": OptunaState.COMPLETE,
@@ -761,7 +898,13 @@ def _rebuild(sampler: Any, history: list[dict[str, Any]], loader: _Distributions
             continue
         try:
             study.add_trial(
-                create_trial(params=params, distributions=distributions, values=values, state=state)
+                create_trial(
+                    params=params,
+                    distributions=distributions,
+                    values=values,
+                    state=state,
+                    system_attrs=entry.get("system") or None,
+                )
             )
         except ValueError:
             # One unreadable row costs the sampler a point of history; raising would fail
@@ -815,13 +958,14 @@ def still_judging(result: dict[str, Any]) -> bool:
 def ranked(
     trials: list[Trial], current: dict[str, list[dict[str, Any]]] | None = None
 ) -> list[dict[str, Any]]:
-    """Finished trials, best first on the first objective, which is always maximised.
+    """Finished trials, best first on the first objective, which is always maximised; in a
+    quality task, every trial that meets its constraints ahead of any that does not.
 
     ``current`` holds the checks BRAIN has since finished, by alpha id; a trial's own copy is
     frozen at simulation time and only stands in for an Alpha the vault does not hold.
     """
     done = [(t, t.values[0]) for t in trials if t.state == TrialState.COMPLETE and t.values]
-    done.sort(key=lambda pair: float(pair[1]), reverse=True)
+    done.sort(key=lambda pair: (_feasible(pair[0]), float(pair[1])), reverse=True)
     # Once its Full run is back, that stands in for a Quick Alpha: the same figures, judged in
     # full. Keyed by task, because a trial's number is only its place in its own sweep.
     superseded = {

@@ -514,3 +514,185 @@ def validate(
         ):
             problems.append(f"{node.value} is not a data field here.")
     return problems
+
+
+# --- statistical traps -----------------------------------------------------------------
+# From WorldQuant BRAIN's IQC 2026 talk: expressions BRAIN accepts and simulates, whose
+# result is quietly meaningless. Each rule is one the talk shows wrong, with its fix.
+
+#: Cross-sectional operators: their output is a rank or a score of today's universe.
+CROSS_SECTIONAL = frozenset(
+    {
+        "rank",
+        "zscore",
+        "scale",
+        "normalize",
+        "quantile",
+        "group_rank",
+        "group_zscore",
+        "group_scale",
+        "group_neutralize",
+        "group_normalize",
+    }
+)
+#: Operators that fill or clean raw data, which belongs before any cross-sectional one.
+CLEANERS = frozenset({"ts_backfill", "winsorize"})
+#: Smoothers and regressions that need a continuous, well-spread input.
+CONTINUOUS = frozenset(
+    {
+        "ts_decay_linear",
+        "ts_mean",
+        "ts_sum",
+        "ts_zscore",
+        "ts_rank",
+        "regression_neut",
+        "rank",
+        "zscore",
+        "group_rank",
+        "group_zscore",
+    }
+)
+#: Functions defined only on part of the line: NaN or a lost sign outside it, silently.
+DOMAIN = {
+    "sqrt": "signed_power(x, 0.5)",
+    "log": "s_log_1p(x)",
+    "arc_sin": "arc_sin(rank(x) * 2 - 1)",
+}
+#: Inputs that keep a domain function safe: never negative, or already bounded.
+SAFE_INPUTS = frozenset({"abs", "rank", "sigmoid", "ts_rank", "group_rank", "quantile"})
+#: Windows below these give noise, not an estimate.
+MIN_WINDOW = {
+    "ts_corr": 20,
+    "ts_covariance": 20,
+    "ts_regression": 20,
+    "ts_zscore": 5,
+    "ts_std_dev": 5,
+}
+#: Longest ts_product before it overflows or underflows.
+MAX_PRODUCT = 20
+#: Price-like series, strictly positive: the only ones ts_returns divides by safely.
+PRICES = frozenset({"close", "open", "high", "low", "vwap"})
+
+
+def inline(tree: Node) -> Node:
+    """The expression's last statement with every assigned name replaced by what it holds, so
+    a trap split across ``a = rank(x); ts_backfill(a, 5)`` is still one tree."""
+    if tree.kind != "seq":
+        return tree
+    env: dict[str, Node] = {}
+
+    def sub(node: Node) -> Node:
+        if node.kind == "name" and node.value in env:
+            return env[node.value]
+        if not node.args and not node.kwargs:
+            return node
+        return replace(
+            node,
+            args=tuple(sub(a) for a in node.args),
+            kwargs=tuple((k, sub(v)) for k, v in node.kwargs),
+        )
+
+    last = tree
+    for statement in tree.args:
+        if statement.kind == "assign" and statement.args:
+            env[statement.value] = sub(statement.args[0])
+        else:
+            last = sub(statement)
+    return last if last is not tree else (next(iter(env.values()), tree) if env else tree)
+
+
+def _number(node: Node | None) -> float | None:
+    if node is None:
+        return None
+    if node.kind == "num":
+        return float(node.value)
+    if node.kind == "unary" and node.value == "-" and node.args and node.args[0].kind == "num":
+        return -float(node.args[0].value)
+    return None
+
+
+def _boolean(node: Node) -> bool:
+    return (node.kind == "binary" and node.value in (*COMPARISONS, "&&", "||")) or (
+        node.kind == "unary" and node.value == "!"
+    )
+
+
+def _core(node: Node) -> Node:
+    """The node under any unary minus."""
+    while node.kind == "unary" and node.value == "-" and node.args:
+        node = node.args[0]
+    return node
+
+
+def lint(tree: Node) -> list[str]:
+    """Statistical traps in this expression, each with its fix; nothing when it is clean."""
+    found: list[str] = []
+    for _, node in walk(inline(tree)):
+        first = _core(node.args[0]) if node.args else None
+        if node.kind == "call":
+            name = node.value
+            if (
+                name in CLEANERS
+                and first is not None
+                and first.kind == "call"
+                and first.value in CROSS_SECTIONAL
+            ):
+                found.append(
+                    f"{name}({first.value}(x)) cleans after ranking: clean raw data first, "
+                    f"{first.value}({name}(x))."
+                )
+            if (
+                name == "ts_zscore"
+                and first is not None
+                and first.kind == "call"
+                and first.value in CROSS_SECTIONAL
+            ):
+                found.append(
+                    f"ts_zscore({first.value}(x)) is a z-score of a near-constant: use "
+                    "rank(ts_zscore(x, d))."
+                )
+            if name in DOMAIN and not (
+                first is not None and first.kind == "call" and first.value in SAFE_INPUTS
+            ):
+                found.append(
+                    f"{name} on a raw signal turns its negatives into NaN: {DOMAIN[name]}."
+                )
+            if name == "power" and len(node.args) > 1:
+                exponent = _number(node.args[1])
+                if exponent is not None and exponent.is_integer() and exponent % 2 == 0:
+                    found.append("power(x, 2) loses the sign: signed_power(x, 2).")
+            window = _number(node.args[-1]) if len(node.args) > 1 else None
+            if name in MIN_WINDOW and window is not None and window < MIN_WINDOW[name]:
+                found.append(
+                    f"{name} over {window:g} days is noise: a window of at least "
+                    f"{MIN_WINDOW[name]}."
+                )
+            if name == "ts_product" and window is not None and window > MAX_PRODUCT:
+                found.append(f"ts_product over {window:g} days overflows: exp(ts_mean(log(x), d)).")
+            if name == "ts_returns" and not (
+                first is not None and first.kind == "name" and first.value in PRICES
+            ):
+                found.append(
+                    "ts_returns divides by a value that can be zero or negative: ts_delta."
+                )
+            if name in CONTINUOUS and first is not None and _boolean(first):
+                found.append(
+                    f"{name} of a true/false is a coin-flip among ties: use the condition as a "
+                    "trade_when filter, and smooth the raw signal."
+                )
+        elif node.kind == "binary" and node.value in COMPARISONS:
+            for side in node.args:
+                if side.kind == "binary" and side.value == "/" and len(side.args) == 2:
+                    total, divisor = side.args
+                    days = (
+                        _number(total.args[1])
+                        if total.kind == "call" and total.value == "ts_sum" and len(total.args) > 1
+                        else None
+                    )
+                    k = _number(divisor)
+                    if days is not None and k is not None and k != days:
+                        found.append(
+                            f"ts_sum over {days:g} days divided by {k:g} is not the average: a "
+                            f"threshold almost always met. Divide by {days:g}."
+                        )
+    return list(dict.fromkeys(found))

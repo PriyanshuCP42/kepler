@@ -43,6 +43,10 @@ OBJECTIVES: dict[str, Objective] = {
     # The Critic's score on the train years, less for repeating your pool: see
     # :func:`..agents.critic.search_score`.
     CRITIC: Objective(CRITIC, "Critic Score"),
+    # A quality search's own (:mod:`.quality`): read from the train years' daily PnL, so they
+    # are filled in after the result, never off its statistics.
+    "train_k_ratio": Objective("train_k_ratio", "Train K-Ratio"),
+    "train_calmar": Objective("train_calmar", "Train Calmar"),
 }
 
 

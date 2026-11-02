@@ -44,8 +44,16 @@ def test_without_a_reported_limit_delay_one_is_assumed():
     assert probe.sharpe_limit([{"sharpe": 1.0, "checks": None}]) == probe.FALLBACK_LIMIT
 
 
-def test_due_once_enough_is_back_on_a_large_task_never_twice():
-    assert probe.due({}, 300, 30)
-    assert not probe.due({}, 300, 29)
+def test_due_once_a_fifth_is_back_on_a_large_task_never_twice():
+    assert probe.due({}, 150, 30)
+    assert not probe.due({}, 300, 59)
+    assert probe.due({}, 300, 60)
     assert not probe.due({}, 50, 40)
     assert not probe.due({probe.KEY: "stopped"}, 300, 60)
+
+
+def test_a_larger_task_waits_longer_but_never_past_the_cap():
+    assert probe.trials_for(100) == probe.PROBE_TRIALS
+    assert probe.trials_for(300) == 60
+    assert probe.trials_for(5000) == probe.PROBE_MAX
+    assert probe.judge(_rows(0.79), trials=60) is None

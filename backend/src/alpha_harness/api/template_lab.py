@@ -27,7 +27,7 @@ from ..brain.schemas import region_label
 from ..catalog.queries import FieldFilter, Tuple4
 from ..db.models import Template, utcnow
 from ..labs import search, template
-from ..labs.fastexpr import Node, ParseError, operator_table, walk
+from ..labs.fastexpr import Node, ParseError, lint, operator_table, walk
 from ..labs.launch import (
     NO_NEUTRALIZATION,
     NO_SIMULATIONS,
@@ -49,6 +49,11 @@ from ..labs.launch import (
 from ..labs.params import TEMPLATE_SAMPLER, TemplateParams
 from ..schemas import Out
 from .deps import State, refuse
+
+#: Decay above which an Alpha keeps only slow mean-reversion (IQC 2026 checklist).
+ADVISED_DECAY = 20
+#: Truncation below which no weight is left to a real position.
+MIN_TRUNCATION = 0.005
 
 router = APIRouter(prefix="/api/template-lab", tags=["template-lab"])
 
@@ -584,6 +589,17 @@ async def _plan(body: TemplateTask, state: Any) -> dict[str, Any]:
             "it keeps 70% of its Sharpe under investability constraints."
         )
 
+    if body.decay > ADVISED_DECAY:
+        warnings.append(
+            f"Decay {body.decay} smooths away all but slow mean-reversion: keep it to "
+            f"{ADVISED_DECAY // 2} or less unless the idea is slow."
+        )
+    if 0 < body.truncation < MIN_TRUNCATION:
+        warnings.append(
+            f"Truncation {body.truncation:g} caps every weight below what a portfolio holds: "
+            "0.01 to 0.08 is usual."
+        )
+
     # -- the variables
     given = body.variables
 
@@ -601,6 +617,7 @@ async def _plan(body: TemplateTask, state: Any) -> dict[str, Any]:
     used = template.uses(tree, vector_call) if tree is not None else {}
     if tree is not None:
         template_problems.extend(template.template_problems(tree, table))
+        template_problems.extend(lint(tree))
     if len(used) > template.MAX_VARIABLES:
         template_problems.append(f"A template holds at most {template.MAX_VARIABLES} variables.")
     defined = template.assigned(tree) if tree is not None else set()

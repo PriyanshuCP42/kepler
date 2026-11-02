@@ -42,7 +42,10 @@ LOOKBACKS = (5, 21, 63, 126, 252)
 GROUPS = ("market", "sector", "industry", "subindustry")
 DECAYS = (0, 3, 5, 7, 10)
 TRUNCATION = DEFAULT_TRUNCATION
-NEUTRALIZATIONS = ("MARKET", "SECTOR", "INDUSTRY", "SUBINDUSTRY")
+#: Searched, not guessed. STATISTICAL and SLOW lead in BRAIN's own IQC 2026 study (1.37 and
+#: 1.27 mean Sharpe) and in this vault: SLOW holds the most strong alphas, STATISTICAL the most
+#: under 0.7 production correlation. MARKET and SECTOR did worst on both, so they are left out.
+NEUTRALIZATIONS = ("STATISTICAL", "SLOW", "SUBINDUSTRY", "INDUSTRY")
 #: Most concurrent slots one lab task may hold: all of the engine's, so a single sweep
 #: can use the whole account when nothing else is running.
 MAX_CORES = SIMULATION_SLOTS

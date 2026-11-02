@@ -163,6 +163,8 @@ class AppState:
         self.optimizer.llm = self.llm
         self.optimizer.screener = self.screener
         self.optimizer.overlap = Overlap(self.db, self.alphas)
+        # A quality search holds its candidates' correlation to your pool as it grows.
+        self.optimizer.pool = self.families.pool
 
         # Imported here: the API layer builds on this module.
         from .api.lab_tasks import requeue

@@ -124,3 +124,18 @@ def test_family_clerk_places_repeats_and_new_ideas():
     assert sibling["family_id"] == "f1"
     other = clerk._place("o", _days(rng.normal(size=600)), pool)
     assert other["family_id"] == "o"
+
+
+def test_family_clerk_fails_an_alpha_that_barely_trades():
+    rng = np.random.default_rng(1)
+    clerk = families.FamilyClerk.__new__(families.FamilyClerk)
+    clerk._leaders = {}
+    pool = {"submitted": series_of(_days(rng.normal(size=600)))}
+    sparse = np.zeros(600)
+    sparse[-13:] = rng.normal(loc=1.0, size=13)  # 13 trading days in ten years
+
+    found = clerk._place("thin", _days(sparse), pool)
+
+    assert found["verdict"] == "fail"
+    assert "13 days" in found["note"]
+    assert "thin" not in clerk._leaders

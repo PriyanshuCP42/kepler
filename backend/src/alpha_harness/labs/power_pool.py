@@ -31,6 +31,7 @@ from ..tasks import spawn
 from . import scheduler, search
 from .fastexpr import (
     ParseError,
+    lint,
     operator_count,
     operator_table,
     parse,
@@ -194,7 +195,7 @@ def check(text: str, ctx: Context, table: dict[str, Any]) -> tuple[str, frozense
         tree = parse(text)
     except ParseError as exc:
         raise Rejected(f"Could not be read: {exc}") from exc
-    if problems := validate(tree, table, set(ctx.names)):
+    if problems := validate(tree, table, set(ctx.names)) or lint(tree):
         raise Rejected(problems[0])
     if (count := operator_count(tree)) > POWER_POOL_MAX_OPERATORS:
         raise Rejected(f"{count} operators; Power Pool allows {POWER_POOL_MAX_OPERATORS}.")

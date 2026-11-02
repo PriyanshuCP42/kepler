@@ -20,7 +20,7 @@ from ..brain.settings_schema import resolve_options
 from ..catalog.queries import FieldFilter
 from ..db.models import Study, StudyStatus
 from ..schemas import Out
-from . import scheduler, search
+from . import quality, scheduler, search
 from .objectives import CRITIC
 from .params import (
     CORRELATION_BREAKER,
@@ -52,18 +52,20 @@ NO_NEUTRALIZATION = "Choose at least one Neutralization."
 #: Alphas a preview shows.
 SAMPLE_SIZE = 5
 #: What each lab's task names start with, and the objective its trials are scored on.
-_TASKS: dict[str, tuple[str, str]] = {
-    SEARCH_SAMPLER: ("search", CRITIC),
-    TEMPLATE_SAMPLER: ("template", CRITIC),
-    GA_SAMPLER: ("evolution", "train_fitness"),
-    POWER_POOL_SAMPLER: ("power-pool", "sharpe"),
-    SETTINGS_SAMPLER: ("settings-sampler", "sharpe"),
-    CORRELATION_BREAKER: ("correlation-breaker", "sharpe"),
-    FIELDS_SAMPLER: ("fields-sampler", "sharpe"),
-    SUPER_LAB: ("super-alpha", "sharpe"),
-    REPAIR_SAMPLER: ("repair", "sharpe"),
-    GUARD_SAMPLER: ("guard", "sharpe"),
-    HYPOTHESIS_SAMPLER: ("hypothesis", CRITIC),
+#: Each lab's task prefix and what it maximises. Search and Template Lab tasks search for
+#: quality (:mod:`.quality`): constrained NSGA-II on three objectives at once.
+_TASKS: dict[str, tuple[str, tuple[str, ...]]] = {
+    SEARCH_SAMPLER: ("search", quality.OBJECTIVES),
+    TEMPLATE_SAMPLER: ("template", quality.OBJECTIVES),
+    GA_SAMPLER: ("evolution", ("train_fitness",)),
+    POWER_POOL_SAMPLER: ("power-pool", ("sharpe",)),
+    SETTINGS_SAMPLER: ("settings-sampler", ("sharpe",)),
+    CORRELATION_BREAKER: ("correlation-breaker", ("sharpe",)),
+    FIELDS_SAMPLER: ("fields-sampler", ("sharpe",)),
+    SUPER_LAB: ("super-alpha", ("sharpe",)),
+    REPAIR_SAMPLER: ("repair", ("sharpe",)),
+    GUARD_SAMPLER: ("guard", ("sharpe",)),
+    HYPOTHESIS_SAMPLER: ("hypothesis", (CRITIC,)),
 }
 
 
@@ -341,7 +343,7 @@ async def add_study(
     """
     lab = TASK_SAMPLERS[sampler]
     prefix, own = _TASKS[sampler]
-    objective = objective or own
+    objectives = [objective] if objective else list(own)
     task = f"{prefix}-{now:%y%m%d%H%M%S%f}"
     row = Study(
         name=f"{lab} · {task}",
@@ -349,8 +351,8 @@ async def add_study(
         template_source=template_source,
         sampler=sampler,
         sampler_params=params.dump(),
-        objectives=[objective],
-        directions=["maximize"],
+        objectives=objectives,
+        directions=["maximize"] * len(objectives),
         batch_size=batch_size,
         max_trials=simulations,
         task=task,

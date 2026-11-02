@@ -5,9 +5,12 @@ of one idea adds count but raises the pool's average correlation, which lowers C
 Alpha Performance. So every alpha the Critic passes is, in order of score:
 
 1. given its daily PnL (one read from BRAIN, not a simulation) if the vault lacks it;
-2. compared with every submitted alpha over the window BRAIN correlates on; at
+2. failed if it traded on fewer than :data:`guard.MIN_TEST_DAYS` days of the recent years: its
+   Sharpe comes from a handful of trades, and its production correlation is low only because
+   it barely holds anything;
+3. compared with every submitted alpha over the window BRAIN correlates on; at
    :data:`POOL_LIMIT` or more it becomes a near miss for the repair desk;
-3. placed in a *family*: the first family leader it moves with at :data:`FAMILY_LIMIT` or
+4. placed in a *family*: the first family leader it moves with at :data:`FAMILY_LIMIT` or
    more, or a family of its own, which makes it a leader and a shortlist candidate.
 
 Only leaders are shortlisted, so the Selector always chooses among distinct ideas.
@@ -26,6 +29,7 @@ from sqlalchemy import select
 from ..db.models import CriticVerdict, utcnow
 from ..labs.ga import Series, correlation, series_of
 from ..vault.metrics import window_start
+from . import guard
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -71,6 +75,12 @@ def closest(days: dict[date, float] | None, pool: dict[str, Series]) -> tuple[st
         if rho is not None and (worst is None or rho > worst[1]):
             worst = (other_id, rho)
     return worst
+
+
+def active_days(days: dict[date, float]) -> int:
+    """Days it traded on since :data:`guard.RECENT_START`: days without PnL are days it held
+    nothing."""
+    return sum(1 for d, v in days.items() if d >= guard.RECENT_START and v != 0)
 
 
 def pool_series(days: dict[str, dict[date, float]]) -> dict[str, Series]:
@@ -169,6 +179,9 @@ class FamilyClerk:
         await self._save(results)
 
         repeats = sum(1 for r in results if r["verdict"] == "near_miss")
+        thin = sum(1 for r in results if r["verdict"] == "fail")
+        if thin:
+            self.bus.count("families", "trade too rarely", thin)
         leaders = sum(1 for r in results if r["family_id"] == r["alpha_id"])
         self.bus.count("families", "placed", len(results))
         if repeats:
@@ -193,6 +206,14 @@ class FamilyClerk:
         }
         if series is None:
             outcome["note"] = "Not enough daily PnL to compare with your pool."
+            return outcome
+        traded = active_days(days or {})
+        if traded < guard.MIN_TEST_DAYS:
+            outcome["verdict"] = "fail"
+            outcome["note"] = (
+                f"Traded on only {traded} days since {guard.RECENT_START.year}: too few for its "
+                "Sharpe to mean anything."
+            )
             return outcome
         worst = closest(days, pool)
         outcome["pool"] = None if worst is None else round(worst[1], 3)
@@ -230,8 +251,8 @@ class FamilyClerk:
                     )
                     gates["pool"] = {"ok": ok, "value": result["pool"], "note": note}
                 row.gates = gates
-                if result["verdict"] == "near_miss":
-                    row.verdict = "near_miss"
+                if result["verdict"] != "pass":
+                    row.verdict = result["verdict"]
                     row.reasons = [*(row.reasons or []), result["note"]]
 
     async def _series_for(
@@ -254,6 +275,11 @@ class FamilyClerk:
         if fetched:
             days.update(await self.alphas.daily_pnl(fetched))
         return days, unread
+
+    async def pool(self) -> dict[str, Series]:
+        """Your submitted Alphas' daily PnL over BRAIN's correlation window, reread when the
+        pool changes: what a search holds its candidates' correlation to."""
+        return await self._pool_series()
 
     async def _pool_series(self) -> dict[str, Series]:
         members = await self.alphas.submitted_members()

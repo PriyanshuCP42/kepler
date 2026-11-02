@@ -2,8 +2,11 @@
 
 Most new templates miss; on the day this was written, ten ideas spent about 1,400
 simulations to learn that none came within half of BRAIN's Sharpe limit. So once a large
-template task has :data:`PROBE_TRIALS` simulations back, its best Sharpe is held to
-:data:`PROBE_SHARE` of BRAIN's own limit for that market. A task that reaches it carries on;
+template task has a fifth of its simulations back (:func:`trials_for`, at least
+:data:`PROBE_TRIALS` and at most :data:`PROBE_MAX`), its best Sharpe is held to
+:data:`PROBE_SHARE` of BRAIN's own limit for that market. A fixed 30 judged a large search on
+its first draws: in BRAIN's IQC 2026 search the best Sharpe was still climbing past 1.5 at
+trial 200. A task that reaches it carries on;
 one that does not is stopped, its unsent simulations dropped. Running it again skips the
 probe: the decision to spend anyway is the user's.
 """
@@ -15,8 +18,12 @@ from typing import Any
 
 from ..vault.yields import checks_of
 
-#: Simulations back before the probe decides.
+#: Fewest simulations back before the probe decides.
 PROBE_TRIALS = 30
+#: Most simulations back before it decides, however large the task.
+PROBE_MAX = 100
+#: Share of a task's simulations the probe waits for, between those two.
+PROBE_FRACTION = 5
 #: Share of BRAIN's Sharpe limit the probe's best must reach.
 PROBE_SHARE = 0.8
 #: Only tasks at least this many times the probe are probed; a small task is its own probe.
@@ -56,12 +63,17 @@ def sharpe_limit(rows: list[dict[str, Any]]) -> float:
     return FALLBACK_LIMIT
 
 
-def judge(rows: list[dict[str, Any]]) -> Probe | None:
-    """The probe over these stored results, or ``None`` while fewer than
-    :data:`PROBE_TRIALS` of them carry a Sharpe: BRAIN can finish simulations before the vault
+def trials_for(max_trials: int) -> int:
+    """Simulations a task of ``max_trials`` has back before the probe decides."""
+    return min(PROBE_MAX, max(PROBE_TRIALS, max_trials // PROBE_FRACTION))
+
+
+def judge(rows: list[dict[str, Any]], trials: int = PROBE_TRIALS) -> Probe | None:
+    """The probe over these stored results, or ``None`` while fewer than ``trials`` of them
+    carry a Sharpe: BRAIN can finish simulations before the vault
     has stored them, and a probe of fewer would cut an idea on less than it promises. Pure."""
     sharpes = [float(s) for r in rows if isinstance(s := r.get("sharpe"), int | float)]
-    if len(sharpes) < PROBE_TRIALS:
+    if len(sharpes) < trials:
         return None
     bar = PROBE_SHARE * sharpe_limit(rows)
     best = max(sharpes)
@@ -71,5 +83,7 @@ def judge(rows: list[dict[str, Any]]) -> Probe | None:
 def due(params: dict[str, Any], max_trials: int, finished: int) -> bool:
     """Whether a task should be probed now: large enough, not yet decided, enough back."""
     return (
-        KEY not in params and max_trials >= PROBE_FACTOR * PROBE_TRIALS and finished >= PROBE_TRIALS
+        KEY not in params
+        and max_trials >= PROBE_FACTOR * PROBE_TRIALS
+        and finished >= trials_for(max_trials)
     )

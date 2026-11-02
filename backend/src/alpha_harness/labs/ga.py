@@ -51,6 +51,7 @@ from .fastexpr import (
     graft_sites,
     grafts,
     guarded,
+    lint,
     node_at,
     operator_count,
     operator_table,
@@ -480,7 +481,7 @@ def child(
         tree, settings = mutate(rng, tree, settings, market, rate)
         if clone(tree, settings):
             tree, settings = mutate(rng, tree, settings, market, 0.0, force=True)
-        if clone(tree, settings) or validate(tree, market.table, market.names):
+        if clone(tree, settings) or validate(tree, market.table, market.names) or lint(tree):
             continue
         return tree, settings
     return None
