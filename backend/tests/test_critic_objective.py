@@ -105,3 +105,26 @@ def test_lab_of_names_the_lab_from_the_task():
     assert lab_of("template-261018204305843437") == "Template Lab"
     assert lab_of("settings-sampler-261018204305843437") is not None
     assert lab_of("manual") is None
+
+
+class TestCost:
+    """Costs at the 5 bps the After-Cost Sharpe columns charge, not a lighter 2."""
+
+    def test_charged_like_the_tables(self):
+        from alpha_harness.agents import critic
+        from alpha_harness.vault import metrics
+
+        assert critic.COST_BPS == metrics.DEFAULT_COST_BPS
+
+    def test_a_margin_that_loses_money_after_costs_earns_nothing_for_its_sharpe(self):
+        # 4 bps of margin kept a third of the Sharpe at 2 bps; at 5 bps it is a loss, scored
+        # like the 5 bps margin that leaves nothing.
+        assert search_score(_row(margin=0.0004)) == search_score(_row(margin=0.0005))
+        assert search_score(_row(margin=0.0004)) < search_score(_row(margin=0.0009))
+
+    def test_the_critic_gates_a_margin_under_its_cost(self):
+        from alpha_harness.agents.critic import judge
+
+        thin = judge(_row(margin=0.0006))
+        assert thin.gates["cost"]["ok"] is False
+        assert judge(_row(margin=0.0009)).gates["cost"]["ok"] is True

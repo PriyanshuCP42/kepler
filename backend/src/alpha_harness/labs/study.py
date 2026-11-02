@@ -26,10 +26,12 @@ from typing import TYPE_CHECKING, Any
 import structlog
 from sqlalchemy import func, select, update
 
+from ..agents import crowding
 from ..agents.critic import search_score
 from ..brain.platform import IGNORED_CHECKS, QUOTA_CHECKS
 from ..brain.schemas import FULL_MODE, QUICK_MODE
 from ..db.models import (
+    CriticVerdict,
     SimStatus,
     SimulationRecord,
     Study,
@@ -206,6 +208,8 @@ class Optimizer:
             )
             if row.sampler == TEMPLATE_SAMPLER and await self._probe(study_id):
                 return {"told": told, "asked": 0}
+            if row.sampler in (SEARCH_SAMPLER, TEMPLATE_SAMPLER) and await self._crowded(study_id):
+                return {"told": told, "asked": 0}
             asked = await scheduler.advance(self, study_id)
         if told or asked:
             await self.notify()
@@ -244,6 +248,43 @@ class Optimizer:
         if found.passed:
             return False
         await scheduler.finish(self, study_id, StudyStatus.COMPLETE, found.message)
+        return True
+
+    async def _crowded(self, study_id: int) -> bool:
+        """Stop a search whose first measured passes all reached BRAIN's Production Correlation
+        limit (:func:`.crowding.search_crowded`); ``True`` when it stopped. Decided once."""
+        async with self.db.session() as session:
+            row = await session.get(Study, study_id)
+            if row is None or crowding.KEY in (row.sampler_params or {}):
+                return False
+            passed = list(
+                await session.scalars(
+                    select(CriticVerdict.alpha_id)
+                    .join(Trial, Trial.alpha_id == CriticVerdict.alpha_id)
+                    .where(Trial.study_id == study_id, CriticVerdict.verdict == "pass")
+                    .order_by(CriticVerdict.landed_at)
+                )
+            )
+        measured = await crowding.measured_in(self.db, list(dict.fromkeys(passed)))
+        # The first measured, in the order they landed: later ones would let a crowded idea run
+        # on while the watch catches up.
+        values = [measured[a] for a in dict.fromkeys(passed) if a in measured][: crowding.SURVIVORS]
+        found = crowding.search_crowded(values)
+        if found is None:
+            return False
+        async with self.db.session() as session:
+            row = await session.get(Study, study_id)
+            if row is None:
+                return False
+            outcome = "stopped" if found else "passed"
+            row.sampler_params = {**(row.sampler_params or {}), crowding.KEY: outcome}
+            await session.commit()
+        log.info("optimize.crowding", study_id=study_id, crowded=found, measured=values)
+        if not found:
+            return False
+        await scheduler.finish(
+            self, study_id, StudyStatus.COMPLETE, crowding.crowded_message(values)
+        )
         return True
 
     async def _harvest(self, study_id: int, *, tell: bool) -> int:

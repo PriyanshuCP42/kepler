@@ -24,7 +24,7 @@ def _row(train: float, test: float, limit: float = 1.58) -> dict[str, Any]:
     return {
         "sharpe": (train + test) / 2,
         "fitness": 2.0,
-        "margin": 0.0006,
+        "margin": 0.0009,
         "train_sharpe": train,
         "test_sharpe": test,
         "operator_count": 6,

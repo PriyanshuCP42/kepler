@@ -19,7 +19,7 @@ from .agents.allocator import Allocator
 from .agents.bus import AgentBus
 from .agents.conductor import Conductor
 from .agents.critic import Critic
-from .agents.crowding import Crowding
+from .agents.crowding import Crowding, ProdWatch
 from .agents.families import FamilyClerk
 from .agents.genius import GeniusSync
 from .agents.guard import Guard
@@ -176,6 +176,7 @@ class AppState:
         self.genius = GeniusSync(self, self.agents)
         self.themes = Themes(self)
         self.crowding = Crowding(self)
+        self.prod_watch = ProdWatch(self)
         self.master = MasterTracker(self)
 
         self._renew_lock = asyncio.Lock()
@@ -243,6 +244,7 @@ class AppState:
         await self.allocator.start()
         await self.repair.start()
         await self.conductor.start()
+        await self.prod_watch.start()
         self._session_watch = asyncio.create_task(self._watch_session(), name="session-watch")
         log.info("startup.complete", data_dir=str(self.settings.data_dir))
 
@@ -371,6 +373,7 @@ class AppState:
             with contextlib.suppress(asyncio.CancelledError):
                 await watch
         await self.conductor.stop()
+        await self.prod_watch.stop()
         await self.families.stop()
         await self.screener.stop()
         await self.repair.stop()

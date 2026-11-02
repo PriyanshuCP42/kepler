@@ -586,7 +586,17 @@ async def check_prod_correlation(body: AlphaIds, state: State) -> WorkflowStarte
     """Ask BRAIN for the Production Correlation of each unsubmitted Alpha here it has not given
     one for, in the order sent. BRAIN limits these checks per hour, so a long list waits that
     out and takes hours. No simulation quota."""
-    alpha_ids = list(dict.fromkeys(body.alpha_ids))
+    try:
+        started = await start_prod_correlation(state, body.alpha_ids)
+    except RuntimeError as exc:
+        raise refuse(409, "already_running", str(exc)) from exc
+    return WorkflowStarted(task_id=started)
+
+
+async def start_prod_correlation(state: State, alpha_ids: list[str]) -> str:
+    """Start the Production Correlation job over ``alpha_ids``; returns its task id. Raises
+    ``RuntimeError`` while another job holds BRAIN's rate limit."""
+    alpha_ids = list(dict.fromkeys(alpha_ids))
 
     async def work(task: Task) -> str:
         stored = await state.alphas.by_ids(alpha_ids)
@@ -641,11 +651,7 @@ async def check_prod_correlation(body: AlphaIds, state: State) -> WorkflowStarte
         detail = f"Production Correlation for {len(wanted) - failed} Alphas"
         return detail + (f". BRAIN could not check {failed}" if failed else "")
 
-    try:
-        started = await state.backfill.start_job("prod-correlation", "Production Correlation", work)
-    except RuntimeError as exc:
-        raise refuse(409, "already_running", str(exc)) from exc
-    return WorkflowStarted(task_id=started)
+    return await state.backfill.start_job("prod-correlation", "Production Correlation", work)
 
 
 @router.post("/power-pool-workflow/stop", status_code=204)

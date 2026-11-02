@@ -10,7 +10,8 @@ BRAIN's checks it applies, from the numbers the vault already stores:
   :data:`STRONG_TEST` on its own while keeping :data:`STRONG_DECAY` of it. A ratio alone
   punishes an alpha for being strong in-sample: test 2.6 against train 5.0 holds up better
   than test 1.2 against train 1.9.
-- **Cost**: a margin under :data:`MIN_MARGIN_BPS` leaves too little after trading costs.
+- **Cost**: a margin under :data:`MIN_MARGIN_BPS` leaves too little after trading costs,
+  charged at the same :data:`COST_BPS` as the After-Cost Sharpe the tables show.
 - **Size**: at most :data:`MAX_OPERATORS` operators, the Power Pool limit; fewer score better.
 
 Correlation against the submitted pool needs daily PnL, so the Family Clerk checks it later
@@ -33,6 +34,7 @@ from sqlalchemy.dialects.sqlite import insert
 
 from ..brain.schemas import QUICK_MODE
 from ..db.models import CriticVerdict, utcnow
+from ..vault import metrics
 from ..vault.yields import IGNORED_CHECKS, REFUSING, checks_of, verdict
 
 if TYPE_CHECKING:
@@ -53,10 +55,11 @@ NEAR_DECAY = 0.3
 STRONG_TEST = 1.3
 #: ...as long as it keeps at least this share of them.
 STRONG_DECAY = 0.45
-#: Trading cost assumed per unit traded, in basis points, as on the Portfolio page.
-COST_BPS = 2.0
+#: Trading cost assumed per unit traded, in basis points: the same charge as the After-Cost
+#: Sharpe the tables show. At 2 bps the Critic passed alphas that lose money at 5.
+COST_BPS = metrics.DEFAULT_COST_BPS
 #: Margin that leaves a third of the Sharpe after :data:`COST_BPS`.
-MIN_MARGIN_BPS = 3.0
+MIN_MARGIN_BPS = 1.5 * COST_BPS
 MAX_OPERATORS = 8
 #: A failing check within this share of its limit is a near miss.
 NEAR = 0.25

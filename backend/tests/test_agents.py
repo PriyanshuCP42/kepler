@@ -25,7 +25,7 @@ def _row(**over):
         "alpha_id": "a1",
         "sharpe": 1.6,
         "fitness": 1.1,
-        "margin": 0.0006,
+        "margin": 0.0009,
         "train_sharpe": 1.7,
         "test_sharpe": 1.3,
         "operator_count": 4,

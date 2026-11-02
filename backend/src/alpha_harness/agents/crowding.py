@@ -8,21 +8,35 @@ back high is **crowded**, one whose alphas came back low is **clean**.
 
 Price and volume data, which nearly every expression reads, says nothing about any one alpha,
 so it is left out of the reckoning.
+
+Measured late, crowding costs a day: a search spends its simulations on one idea and learns
+next morning that everyone has it. So the :class:`ProdWatch` asks BRAIN about each alpha the
+Critic passes as it lands, a few at a time, and a search whose first :data:`SURVIVORS` measured
+passes all reach BRAIN's limit is stopped (:func:`search_crowded`).
 """
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import time
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
+import structlog
 from sqlalchemy import func, select
 
-from ..db.models import BrainCache
+from ..db.models import BrainCache, CriticVerdict, utcnow
 from ..labs.fastexpr import ParseError, data_fields, parse
+from ..vault.yields import is_submitted
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+
+    from ..db.sqlite import Database
+
+log = structlog.get_logger(__name__)
 
 #: The Production Correlation Kepler holds alphas to, under BRAIN's own 0.7.
 PROD_TARGET = 0.6
@@ -36,6 +50,20 @@ MIN_MEASURED = 5
 BACKGROUND_CATEGORY = "pv"
 #: Seconds the reckoning is kept.
 TTL = 1800.0
+
+#: BRAIN's own Production Correlation limit.
+BRAIN_LIMIT = 0.7
+#: Measured passes a search needs, all at BRAIN's limit, before it is stopped as crowded.
+SURVIVORS = 3
+#: Seconds between the watch's rounds.
+WATCH_SECONDS = 600.0
+#: Alphas the watch sends BRAIN per round: its correlation checks are limited per hour, and a
+#: long job would hold the one job slot the Desk's own checks need.
+WATCH_BATCH = 10
+#: How far back the watch looks for passes the Critic landed.
+WATCH_DAYS = 3
+#: Where a search's crowding outcome is kept on its study, so it is decided once.
+KEY = "crowding"
 
 _PROD_PREFIX = "correlation:prod:"
 
@@ -137,19 +165,7 @@ class Crowding:
 
     async def measured(self, alpha_ids: list[str]) -> dict[str, float]:
         """The Production Correlation BRAIN has given for each of ``alpha_ids`` that has one."""
-        if not alpha_ids:
-            return {}
-        async with self.state.db.session() as session:
-            rows = await session.execute(
-                select(BrainCache.key, func.json_extract(BrainCache.body, "$.max")).where(
-                    BrainCache.key.in_([f"{_PROD_PREFIX}{a}" for a in alpha_ids])
-                )
-            )
-            return {
-                key.removeprefix(_PROD_PREFIX): float(value)
-                for key, value in rows.tuples()
-                if isinstance(value, int | float)
-            }
+        return await measured_in(self.state.db, alpha_ids)
 
     async def too_crowded(self, expression: str | None, known: float | None) -> bool:
         """Whether an alpha's own Production Correlation, or failing that its datasets', is
@@ -162,3 +178,99 @@ class Crowding:
     async def expected_for(self, expression: str | None) -> float | None:
         table = await self.table()  # Reads the field map ``datasets`` needs first.
         return expected(self.datasets(expression), table)
+
+
+async def measured_in(db: Database, alpha_ids: list[str]) -> dict[str, float]:
+    """The Production Correlation BRAIN has given for each of ``alpha_ids`` that has one."""
+    if not alpha_ids:
+        return {}
+    async with db.session() as session:
+        rows = await session.execute(
+            select(BrainCache.key, func.json_extract(BrainCache.body, "$.max")).where(
+                BrainCache.key.in_([f"{_PROD_PREFIX}{a}" for a in alpha_ids])
+            )
+        )
+        return {
+            key.removeprefix(_PROD_PREFIX): float(value)
+            for key, value in rows.tuples()
+            if isinstance(value, int | float)
+        }
+
+
+def search_crowded(measured: list[float]) -> bool | None:
+    """Whether a search's measured passes say its idea is crowded: ``True`` once
+    :data:`SURVIVORS` are measured and every one reaches :data:`BRAIN_LIMIT`, ``False`` as soon
+    as one is under it, ``None`` while it is too early to say. Pure."""
+    if any(v < BRAIN_LIMIT for v in measured):
+        return False
+    return True if len(measured) >= SURVIVORS else None
+
+
+def crowded_message(measured: list[float]) -> str:
+    values = ", ".join(f"{v:.2f}" for v in sorted(measured))
+    return (
+        f"Stopped as crowded: its first {len(measured)} alphas the Critic passed all reached "
+        f"BRAIN's Production Correlation limit of {BRAIN_LIMIT} ({values}). Others already "
+        "hold this idea; unsent simulations were dropped."
+    )
+
+
+class ProdWatch:
+    """Asks BRAIN for the Production Correlation of each alpha the Critic passes as it lands,
+    :data:`WATCH_BATCH` at a time, so a crowded idea shows within the hour. No simulation
+    quota; a round waits while another job holds BRAIN's rate limit."""
+
+    def __init__(self, state: Any) -> None:
+        self.state = state
+        self._task: asyncio.Task[None] | None = None
+
+    async def start(self) -> None:
+        self._task = asyncio.create_task(self._run(), name="prod-watch")
+
+    async def stop(self) -> None:
+        if self._task is not None:
+            self._task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._task
+
+    async def _run(self) -> None:
+        while True:
+            await asyncio.sleep(WATCH_SECONDS)
+            # One bad round must not end the watch.
+            try:
+                await self.round()
+            except Exception:
+                log.warning("prod_watch.round_failed", exc_info=True)
+
+    async def round(self) -> list[str]:
+        """Start one batch; returns the alphas sent, none while signed out or busy."""
+        if not self.state.auth.session.authenticated or self.state.backfill.busy:
+            return []
+        wanted = await self.unmeasured()
+        if not wanted:
+            return []
+        # Imported here: the API layer builds on this module.
+        from ..api.lab_tasks import start_prod_correlation
+
+        try:
+            await start_prod_correlation(self.state, wanted)
+        except RuntimeError:
+            return []  # another job took the slot meanwhile
+        log.info("prod_watch.sent", alphas=len(wanted))
+        return wanted
+
+    async def unmeasured(self) -> list[str]:
+        """The best recent passes BRAIN has not measured, at most :data:`WATCH_BATCH`."""
+        since = utcnow() - timedelta(days=WATCH_DAYS)
+        async with self.state.db.session() as session:
+            ids = list(
+                await session.scalars(
+                    select(CriticVerdict.alpha_id)
+                    .where(CriticVerdict.verdict == "pass", CriticVerdict.landed_at >= since)
+                    .order_by(CriticVerdict.score.desc())
+                    .limit(WATCH_BATCH * 10)
+                )
+            )
+        known = await measured_in(self.state.db, ids)
+        stored = await self.state.alphas.by_ids([a for a in ids if a not in known])
+        return [a for a in ids if a in stored and not is_submitted(stored[a])][:WATCH_BATCH]
