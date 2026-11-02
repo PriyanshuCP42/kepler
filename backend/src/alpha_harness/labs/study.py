@@ -120,6 +120,9 @@ class Optimizer:
         #: Per quality task: Production Correlation measured, by Alpha and by combination of
         #: data fields, as of its last round.
         self.production: dict[int, tuple[dict[str, float], dict[frozenset[str], float]]] = {}
+        #: Per quality task: the NSGA-II generation of each trial still open when its sampler
+        #: was rebuilt, by trial number, so it is scored in the generation it was drawn in.
+        self.generations: dict[int, dict[int, int]] = {}
         self.studies: dict[int, optuna.Study] = {}
         #: Live Optuna trial objects for the round in flight, keyed study -> our trial
         #: number. Lost on restart, which :func:`_tell_many` handles by replaying.
@@ -366,7 +369,10 @@ class Optimizer:
             # Rebuilt from the rows on the next ask, with the new constraints; open trials are
             # told as replayed ones.
             self.studies.pop(study_id, None)
-            self.open_trials.pop(study_id, None)
+            kept = self.generations.setdefault(study_id, {})
+            for number, live in (self.open_trials.pop(study_id, None) or {}).items():
+                if (generation := _generation(live)) is not None:
+                    kept[number] = generation
             log.info("optimize.production", study_id=study_id, updated=len(changed))
 
         record = params.get(quality.PROD_KEY) or {}
@@ -695,7 +701,11 @@ class Optimizer:
             scored = quality.score(
                 train_sharpe, train_fitness, margin, checks, curve, rho, production
             )
-            generation = _generation(live)
+            generation = (
+                _generation(live)
+                if live is not None
+                else self.generations.get(trial.study_id, {}).pop(trial.number, None)
+            )
             graded.append(
                 (
                     live,
