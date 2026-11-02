@@ -1,8 +1,8 @@
 """Which datasets make alphas that everyone else already has, learned from Production Correlation.
 
 BRAIN refuses an alpha whose Production Correlation (against every user's alphas) reaches 0.7,
-and Kepler aims lower, :data:`PROD_TARGET`: an alpha that close to others' adds little to
-your combined performance. Production Correlation is known only once BRAIN is asked, so the
+and Kepler holds Ready alphas under :data:`PROD_TARGET`, the same 0.7: the ceiling you set.
+Production Correlation is known only once BRAIN is asked, so the
 datasets each measured alpha reads stand in for it before then: a dataset whose alphas came
 back high is **crowded**, one whose alphas came back low is **clean**.
 
@@ -38,8 +38,8 @@ if TYPE_CHECKING:
 
 log = structlog.get_logger(__name__)
 
-#: The Production Correlation Kepler holds alphas to, under BRAIN's own 0.7.
-PROD_TARGET = 0.6
+#: The Production Correlation Kepler holds Ready alphas under: BRAIN's own limit, as you set it.
+PROD_TARGET = 0.7
 #: Mean Production Correlation of a dataset's measured alphas at which it counts as crowded.
 CROWDED = 0.65
 #: And at or under which it counts as clean.

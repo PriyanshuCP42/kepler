@@ -85,7 +85,7 @@ async def db(tmp_path: Path):
 
 
 async def test_a_blocked_leader_gives_its_place_to_a_clean_member(db, monkeypatch):
-    measured = {"lead": 0.62, "close": 0.65, "clean": 0.59, "cleaner": 0.56, "other": 0.4}
+    measured = {"lead": 0.72, "close": 0.75, "clean": 0.69, "cleaner": 0.66, "other": 0.5}
     async with db.session() as s:
         for alpha_id, score in (("lead", 83), ("close", 82), ("clean", 80), ("cleaner", 70)):
             s.add(CriticVerdict(alpha_id=alpha_id, verdict="pass", score=score, family_id="lead"))

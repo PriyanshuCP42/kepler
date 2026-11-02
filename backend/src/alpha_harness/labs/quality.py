@@ -41,6 +41,7 @@ from typing import Any
 
 import numpy as np
 
+from ..agents.crowding import PROD_TARGET
 from ..brain.platform import TEST_PERIOD_YEARS
 from ..vault import metrics
 
@@ -55,8 +56,8 @@ HARD_CHECKS = frozenset({"LOW_TURNOVER", "HIGH_TURNOVER", "LOW_SUB_UNIVERSE_SHAR
 #: Correlation with a submitted alpha at which a candidate repeats your pool (as the Family
 #: Clerk holds it).
 POOL_LIMIT = 0.6
-#: Production Correlation above which a candidate is crowded: under BRAIN's 0.7, with room.
-PROD_LIMIT = 0.6
+#: Production Correlation above which a candidate is crowded: the Desk's own ceiling.
+PROD_LIMIT = PROD_TARGET
 #: Trials sent to BRAIN for Production Correlation at once, and at most per task.
 PROD_PER_ROUND = 5
 PROD_BUDGET = 40
