@@ -18,9 +18,15 @@ the sampler learns which regions to avoid rather than forgetting them:
 - train Sharpe at least :data:`MIN_SHARPE`;
 - none of BRAIN's :data:`HARD_CHECKS` failed, and no check in ERROR;
 - margin at least :data:`metrics.DEFAULT_COST_BPS`, what the tables charge to trade;
-- correlation with your submitted pool at most :data:`families.POOL_LIMIT`, measured live
-  against the pool as it grows: a crowded idea is infeasible while it is searched, not found
-  out after.
+- correlation with your submitted pool at most :data:`POOL_LIMIT`, measured live against the
+  pool as it grows: a crowded idea is infeasible while it is searched, not found out after;
+- Production Correlation at most :data:`PROD_LIMIT`. Your pool is a few dozen Alphas; BRAIN's
+  production is everyone's, and only BRAIN can measure it, a few at a time. So as the search
+  runs, the best feasible trials not yet measured are sent to BRAIN, :data:`PROD_PER_ROUND`
+  at a time and at most :data:`PROD_BUDGET` a task, each reading a different set of data
+  fields. What comes back holds for every trial reading the same fields: variants of one
+  combination that differ in windows or settings move together. A crowded combination turns
+  infeasible, and the search breeds away from it.
 
 Daily PnL costs one read from BRAIN, so it is read only for a trial that clears the first
 three; any other scores nothing on the first two objectives, which constrained domination
@@ -41,7 +47,7 @@ from ..vault import metrics
 #: The objectives, maximised in this order.
 OBJECTIVES = ("train_k_ratio", "train_calmar", "train_fitness")
 #: The constraints, in the order they are stored.
-CONSTRAINTS = ("sharpe", "checks", "margin", "pool")
+CONSTRAINTS = ("sharpe", "checks", "margin", "pool", "prod")
 #: The least train Sharpe a feasible trial has.
 MIN_SHARPE = 1.0
 #: Checks whose failure makes a trial infeasible however good its curve: BRAIN refuses it.
@@ -49,6 +55,13 @@ HARD_CHECKS = frozenset({"LOW_TURNOVER", "HIGH_TURNOVER", "LOW_SUB_UNIVERSE_SHAR
 #: Correlation with a submitted alpha at which a candidate repeats your pool (as the Family
 #: Clerk holds it).
 POOL_LIMIT = 0.6
+#: Production Correlation above which a candidate is crowded: under BRAIN's 0.7, with room.
+PROD_LIMIT = 0.6
+#: Trials sent to BRAIN for Production Correlation at once, and at most per task.
+PROD_PER_ROUND = 5
+PROD_BUDGET = 40
+#: Where a task keeps what it has sent (``asked``) and when (``at``).
+PROD_KEY = "production"
 #: The elite pool's size: a fifth of the fields searched, between these.
 POPULATION_SHARE = 0.2
 MIN_POPULATION = 100
@@ -149,6 +162,7 @@ def score(
     checks: list[dict[str, Any]],
     curve: tuple[float | None, float | None] = (None, None),
     pool_correlation: float | None = None,
+    production: float | None = None,
 ) -> Scored:
     """A trial's objectives and constraints. Pure.
 
@@ -159,6 +173,7 @@ def score(
     constraints = [
         *cheap_constraints(train_sharpe, margin, checks),
         round(pool_correlation - POOL_LIMIT, 4) if pool_correlation is not None else 0.0,
+        prod_constraint(production),
     ]
     return Scored(
         values=[
@@ -171,5 +186,72 @@ def score(
             "kRatio": None if k is None else round(k, 3),
             "calmar": None if calmar is None else round(calmar, 3),
             "poolCorrelation": None if pool_correlation is None else round(pool_correlation, 3),
+            "prodCorrelation": None if production is None else round(production, 3),
         },
     )
+
+
+def prod_constraint(production: float | None) -> float:
+    """The Production Correlation constraint: met while unmeasured."""
+    return round(production - PROD_LIMIT, 4) if production is not None else 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class Candidate:
+    """A finished trial, as the Production Correlation round reads it."""
+
+    alpha_id: str | None
+    #: The data fields it reads: variants of one combination move together.
+    fields: frozenset[str]
+    values: tuple[float, ...]
+    constraints: tuple[float, ...]
+
+    @property
+    def feasible(self) -> bool:
+        """Feasible on every constraint but Production Correlation's own."""
+        return all(c <= 0 for c in self.constraints[: CONSTRAINTS.index("prod")])
+
+
+def by_fields(
+    candidates: list[Candidate], measured: dict[str, float]
+) -> dict[frozenset[str], float]:
+    """The highest Production Correlation measured for each combination of data fields."""
+    found: dict[frozenset[str], float] = {}
+    for c in candidates:
+        if c.alpha_id in measured and c.fields:
+            found[c.fields] = max(found.get(c.fields, float("-inf")), measured[c.alpha_id])
+    return found
+
+
+def production_of(
+    candidate: Candidate, measured: dict[str, float], shared: dict[frozenset[str], float]
+) -> float | None:
+    """Its own measurement, else the highest of its combination's, else unknown."""
+    if candidate.alpha_id in measured:
+        return measured[candidate.alpha_id]
+    return shared.get(candidate.fields)
+
+
+def to_measure(
+    candidates: list[Candidate], measured: dict[str, float], asked: set[str], room: int
+) -> list[str]:
+    """The next trials to send to BRAIN: the best feasible ones whose combination of fields is
+    still unmeasured, one per combination, at most ``room``. Pure."""
+    shared = by_fields(candidates, measured)
+    picked: list[str] = []
+    taken: set[frozenset[str]] = set()
+    for c in sorted(candidates, key=lambda c: c.values, reverse=True):
+        if len(picked) >= min(room, PROD_PER_ROUND):
+            break
+        if (
+            not c.feasible
+            or not c.alpha_id
+            or c.alpha_id in measured
+            or c.alpha_id in asked
+            or c.fields in shared
+            or c.fields in taken
+        ):
+            continue
+        picked.append(c.alpha_id)
+        taken.add(c.fields)
+    return picked

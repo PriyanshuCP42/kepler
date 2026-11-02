@@ -106,3 +106,45 @@ def test_nsga2_runs_on_the_lab_space_and_a_restart_keeps_its_generations():
     nxt = again.ask()
     nxt.suggest_categorical("field", fields)
     assert again.sampler.get_trial_generation(again, nxt._cached_frozen_trial) >= 1
+
+
+def _cand(alpha_id, fields, k, feasible=True, prod=0.0):
+    constraints = (-0.5, 0.0, -2.0, -0.1 if feasible else 0.3, prod)
+    return quality.Candidate(alpha_id, frozenset(fields), (k, 1.0, 1.0), constraints)
+
+
+def test_the_best_feasible_trial_of_each_unmeasured_combination_is_sent():
+    candidates = [
+        _cand("a", {"rev", "val"}, 3.0),
+        _cand("b", {"rev", "val"}, 2.5),  # same combination as a: one check covers both
+        _cand("c", {"rev", "qual"}, 2.0, feasible=False),  # infeasible: not worth a check
+        _cand("d", {"ins"}, 1.5),
+        _cand("e", {"short"}, 1.0),  # its combination is already measured
+        _cand("f", {"short"}, 0.9),
+    ]
+    picked = quality.to_measure(candidates, {"f": 0.81}, asked=set(), room=10)
+    assert picked == ["a", "d"]
+    assert quality.to_measure(candidates, {"f": 0.81}, asked={"a"}, room=10) == ["b", "d"]
+    assert quality.to_measure(candidates, {}, asked=set(), room=1) == ["a"]
+
+
+def test_a_measurement_holds_for_its_whole_combination():
+    candidates = [_cand("a", {"rev", "val"}, 3.0), _cand("b", {"rev", "val"}, 2.0)]
+    shared = quality.by_fields(candidates, {"a": 0.82})
+    assert quality.production_of(candidates[1], {"a": 0.82}, shared) == 0.82
+    assert quality.production_of(_cand("z", {"ins"}, 1.0), {"a": 0.82}, shared) is None
+    crowded = quality.score(1.6, 1.1, 0.006, [], (2.0, 1.0), 0.2, production=0.82)
+    assert not crowded.feasible and crowded.constraints[-1] > 0
+    assert quality.score(1.6, 1.1, 0.006, [], (2.0, 1.0), 0.2, production=0.45).feasible
+
+
+def test_a_trial_reads_as_its_data_fields_and_constraints():
+    trial = SimpleNamespace(
+        expression="r = ts_backfill(rev, 21);\ngroup_neutralize(rank(r) * rank(val), country)",
+        alpha_id="x",
+        result={"constraints": [-0.1, 0.0, -1.0, -0.2]},
+        values=[2.0, 1.0, 1.1],
+    )
+    found = study_module._candidate(trial)
+    assert found.fields == frozenset({"rev", "val"})
+    assert found.feasible

@@ -165,6 +165,7 @@ class AppState:
         self.optimizer.overlap = Overlap(self.db, self.alphas)
         # A quality search holds its candidates' correlation to your pool as it grows.
         self.optimizer.pool = self.families.pool
+        self.optimizer.measure_prod = self._measure_prod
 
         # Imported here: the API layer builds on this module.
         from .api.lab_tasks import requeue
@@ -249,6 +250,19 @@ class AppState:
         await self.prod_watch.start()
         self._session_watch = asyncio.create_task(self._watch_session(), name="session-watch")
         log.info("startup.complete", data_dir=str(self.settings.data_dir))
+
+    async def _measure_prod(self, alpha_ids: list[str]) -> bool:
+        """Send a quality search's candidates to BRAIN for Production Correlation; ``False``
+        while another job holds BRAIN's correlation slot, to be tried on a later round."""
+        from .api.lab_tasks import start_prod_correlation
+
+        if not self.auth.session.authenticated or self.backfill.busy:
+            return False
+        try:
+            await start_prod_correlation(self, alpha_ids)
+        except RuntimeError:
+            return False
+        return True
 
     async def _alpha_landed(self, alpha_id: str) -> None:
         """Store a finished alpha, then let the Critic judge it. A Critic fault never loses it."""

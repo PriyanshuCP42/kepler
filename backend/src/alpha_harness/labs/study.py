@@ -20,7 +20,7 @@ separately, so trials stay joinable to the simulations that produced them.
 
 import asyncio
 import contextlib
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Literal
 
 import structlog
@@ -43,6 +43,7 @@ from ..db.models import (
 from ..vault.yields import checks_of, clean, gating_results, limits_of, verdict
 from . import distributions, probe, quality, scheduler
 from . import objectives as obj
+from .fastexpr import ParseError, data_fields, parse
 from .objectives import StudyNotFoundError
 from .params import SEARCH_SAMPLER, TASK_SAMPLERS, TEMPLATE_SAMPLER, SearchParams, params_of
 
@@ -77,6 +78,8 @@ VAULT_WAIT = timedelta(minutes=5)
 QUALITY_READ = ("train_sharpe", "train_fitness")
 #: Longest one feasible trial's PnL read may take before it is scored without its curve.
 PNL_SECONDS = 45.0
+#: How long a Production Correlation round may stay unanswered before the next is sent.
+PROD_WAIT = timedelta(minutes=30)
 
 
 class Optimizer:
@@ -111,6 +114,12 @@ class Optimizer:
         #: Set by the app: your submitted pool's daily PnL, which a quality search holds its
         #: candidates' correlation to (:mod:`.quality`).
         self.pool: Callable[[], Awaitable[dict[str, Any]]] | None = None
+        #: Set by the app: sends Alphas to BRAIN for Production Correlation; ``False`` while
+        #: another job holds BRAIN's correlation slot.
+        self.measure_prod: Callable[[list[str]], Awaitable[bool]] | None = None
+        #: Per quality task: Production Correlation measured, by Alpha and by combination of
+        #: data fields, as of its last round.
+        self.production: dict[int, tuple[dict[str, float], dict[frozenset[str], float]]] = {}
         self.studies: dict[int, optuna.Study] = {}
         #: Live Optuna trial objects for the round in flight, keyed study -> our trial
         #: number. Lost on restart, which :func:`_tell_many` handles by replaying.
@@ -209,6 +218,12 @@ class Optimizer:
             if row.sampler not in TASK_SAMPLERS:
                 raise ValueError(f"No lab runs studies with the {row.sampler!r} sampler.")
 
+            if row.sampler in (SEARCH_SAMPLER, TEMPLATE_SAMPLER):
+                try:
+                    await self._production(study_id)
+                # Steering is a refinement: a failed round must not stop the search.
+                except Exception:
+                    log.warning("optimize.production_failed", study_id=study_id, exc_info=True)
             # Evolution Lab breeds its own children: there is no sampler to tell.
             told = await self._harvest(
                 study_id, tell=row.sampler in (SEARCH_SAMPLER, TEMPLATE_SAMPLER)
@@ -293,6 +308,91 @@ class Optimizer:
             self, study_id, StudyStatus.COMPLETE, crowding.crowded_message(values)
         )
         return True
+
+    async def _production(self, study_id: int) -> None:
+        """A quality task's Production Correlation round (:mod:`.quality`).
+
+        Applies what BRAIN has measured since to every trial reading the same fields, and
+        rebuilds the sampler when that changed a constraint; then sends the best unmeasured
+        feasible trials once the last round is answered.
+        """
+        async with self.db.session() as session:
+            row = await session.get(Study, study_id)
+            if row is None or not quality.is_quality(list(row.objectives or [])):
+                return
+            trials = list(
+                await session.scalars(
+                    select(Trial).where(
+                        Trial.study_id == study_id,
+                        Trial.state == TrialState.COMPLETE,
+                        Trial.alpha_id.is_not(None),
+                    )
+                )
+            )
+            params = dict(row.sampler_params or {})
+        candidates = {t.id: _candidate(t) for t in trials}
+        measured = await crowding.measured_in(
+            self.db, [c.alpha_id for c in candidates.values() if c.alpha_id]
+        )
+        shared = quality.by_fields(list(candidates.values()), measured)
+        self.production[study_id] = (measured, shared)
+
+        slot = quality.CONSTRAINTS.index("prod")
+        changed: dict[int, tuple[list[float], float]] = {}
+        for trial in trials:
+            value = quality.production_of(candidates[trial.id], measured, shared)
+            if value is None:
+                continue
+            constraints = list((trial.result or {}).get("constraints") or [])
+            constraints += [0.0] * (len(quality.CONSTRAINTS) - len(constraints))
+            new = quality.prod_constraint(value)
+            if constraints[slot] != new:
+                constraints[slot] = new
+                changed[trial.id] = (constraints, value)
+        if changed:
+            async with self.db.session() as session:
+                for stored in await session.scalars(
+                    select(Trial).where(Trial.id.in_(list(changed)))
+                ):
+                    constraints, value = changed[stored.id]
+                    result = dict(stored.result or {})
+                    result["constraints"] = constraints
+                    result["quality"] = {
+                        **(result.get("quality") or {}),
+                        "prodCorrelation": round(value, 3),
+                    }
+                    stored.result = result
+                await session.commit()
+            # Rebuilt from the rows on the next ask, with the new constraints; open trials are
+            # told as replayed ones.
+            self.studies.pop(study_id, None)
+            self.open_trials.pop(study_id, None)
+            log.info("optimize.production", study_id=study_id, updated=len(changed))
+
+        record = params.get(quality.PROD_KEY) or {}
+        asked = list(record.get("asked") or [])
+        last = asked[-quality.PROD_PER_ROUND :]
+        sent = record.get("at")
+        waiting = any(a not in measured for a in last) and (
+            sent is not None and utcnow() - datetime.fromisoformat(sent) < PROD_WAIT
+        )
+        if waiting or len(asked) >= quality.PROD_BUDGET or self.measure_prod is None:
+            return
+        pick = quality.to_measure(
+            list(candidates.values()), measured, set(asked), quality.PROD_BUDGET - len(asked)
+        )
+        if not pick or not await self.measure_prod(pick):
+            return
+        async with self.db.session() as session:
+            row = await session.get(Study, study_id)
+            if row is None:
+                return
+            row.sampler_params = {
+                **(row.sampler_params or {}),
+                quality.PROD_KEY: {"asked": [*asked, *pick], "at": utcnow().isoformat()},
+            }
+            await session.commit()
+        log.info("optimize.production_sent", study_id=study_id, alphas=pick)
 
     async def _harvest(self, study_id: int, *, tell: bool) -> int:
         """Score every trial whose simulation reached a terminal state.
@@ -590,7 +690,11 @@ class Optimizer:
                         pool = await self.pool() if self.pool is not None else {}
                     worst = closest(days, pool) if pool else None
                     rho = worst[1] if worst is not None else None
-            scored = quality.score(train_sharpe, train_fitness, margin, checks, curve, rho)
+            measured, shared = self.production.get(trial.study_id, ({}, {}))
+            production = quality.production_of(_candidate(trial), measured, shared)
+            scored = quality.score(
+                train_sharpe, train_fitness, margin, checks, curve, rho, production
+            )
             generation = _generation(live)
             graded.append(
                 (
@@ -826,6 +930,21 @@ def _sampler(row: Study, slots: dict[str, tuple[str, ...]]) -> Any:
         multivariate=True,
         group=True,
         constant_liar=row.batch_size > 1,
+    )
+
+
+def _candidate(trial: Trial) -> quality.Candidate:
+    """A finished trial as the Production Correlation round reads it."""
+    try:
+        fields = frozenset(data_fields(parse(trial.expression or "")))
+    except ParseError:
+        fields = frozenset()
+    result = trial.result or {}
+    return quality.Candidate(
+        alpha_id=trial.alpha_id or result.get("alphaId"),
+        fields=fields,
+        values=tuple(float(v) for v in (trial.values or [])),
+        constraints=tuple(float(c) for c in (result.get("constraints") or [])),
     )
 
 
