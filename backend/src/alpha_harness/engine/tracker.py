@@ -69,6 +69,17 @@ LOST = (
     "BRAIN answered every read of this simulation with a server error for 30 minutes while "
     "answering everything else, so it is no longer waited on."
 )
+#: How long a running simulation's progress may stand still before it is cancelled. BRAIN
+#: sometimes leaves a multi-simulation pending for good, at 15% or 90%, while every read
+#: succeeds: the lost rule never fires and the batch holds a core until the next restart. A
+#: batch takes 2 to 20 minutes, so 45 without any movement is a stall, not a slow run.
+STALL_AFTER_SECONDS = 45 * 60
+
+
+def stalled(seen: tuple[float | None, float] | None, progress: float | None, now: float) -> bool:
+    """Whether a pending simulation last seen at ``seen`` (its progress, and since when) has
+    stood still for :data:`STALL_AFTER_SECONDS`. Pure."""
+    return seen is not None and seen[0] == progress and now - seen[1] >= STALL_AFTER_SECONDS
 
 
 class SimulationTracker:
@@ -99,6 +110,8 @@ class SimulationTracker:
         self._next_poll: dict[str, float] = {}
         #: Platform id -> monotonic time its reads started failing with a server error.
         self._failing_since: dict[str, float] = {}
+        #: Platform id -> its progress when last seen to change, and when (monotonic).
+        self._progress_since: dict[str, tuple[float | None, float]] = {}
         #: Adopted rows this process is sending right now. Their ``created_at`` is when
         #: they were queued, so without this the stale-send check could orphan one
         #: mid-request.
@@ -496,6 +509,8 @@ class SimulationTracker:
             case "retry":
                 return False
             case "pending":
+                if await self._stall(record, outcome.progress):
+                    return True
                 if outcome.progress is None or outcome.progress == record.progress:
                     return False
                 async with self.db.session() as session:
@@ -509,6 +524,21 @@ class SimulationTracker:
                 return await self._hand_over_children(record, outcome)
             case "gone" | "finished":
                 return await self._apply_terminal(record, outcome)
+
+    async def _stall(self, record: SimulationRecord, progress: float | None) -> bool:
+        """Cancel a simulation whose progress has stood still for :data:`STALL_AFTER_SECONDS`
+        (:func:`stalled`), so it stops holding a core. ``True`` when it was cancelled."""
+        platform_id = record.platform_id or ""
+        now = time.monotonic()
+        seen = self._progress_since.get(platform_id)
+        if seen is None or seen[0] != progress:
+            self._progress_since[platform_id] = (progress, now)
+            return False
+        if not stalled(seen, progress, now):
+            return False
+        self._progress_since.pop(platform_id, None)
+        log.warning("sim.stalled", record_id=record.id, platform_id=platform_id, progress=progress)
+        return await self.cancel(record.id)
 
     async def read(self, platform_id: str) -> tuple[Outcome, dict[str, Any]] | None:
         """Read one simulation if a read is due: what it means, and the body it came in.
@@ -552,6 +582,7 @@ class SimulationTracker:
             case "fanout" | "gone" | "finished":
                 self._next_poll.pop(platform_id, None)
                 self._failing_since.pop(platform_id, None)
+                self._progress_since.pop(platform_id, None)
         return outcome, body
 
     async def _lost(self, platform_id: str) -> bool:
