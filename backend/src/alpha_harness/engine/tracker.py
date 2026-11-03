@@ -74,6 +74,10 @@ LOST = (
 #: succeeds: the lost rule never fires and the batch holds a core until the next restart. A
 #: batch takes 2 to 20 minutes, so 45 without any movement is a stall, not a slow run.
 STALL_AFTER_SECONDS = 45 * 60
+STALLED = (
+    "BRAIN left this simulation's progress unchanged for 45 minutes and did not answer a "
+    "cancel, so it is no longer waited on."
+)
 
 
 def stalled(seen: tuple[float | None, float] | None, progress: float | None, now: float) -> bool:
@@ -531,6 +535,12 @@ class SimulationTracker:
         platform_id = record.platform_id or ""
         now = time.monotonic()
         seen = self._progress_since.get(platform_id)
+        if seen is None and progress == record.progress and record.submitted_at is not None:
+            # Unchanged since this row last recorded it, before a restart: count from the
+            # send, or a batch stuck for hours would get a fresh 45 minutes every restart.
+            submitted = record.submitted_at.replace(tzinfo=UTC)
+            seen = (progress, now - max(0.0, (utcnow() - submitted).total_seconds()))
+            self._progress_since[platform_id] = seen
         if seen is None or seen[0] != progress:
             self._progress_since[platform_id] = (progress, now)
             return False
@@ -538,7 +548,14 @@ class SimulationTracker:
             return False
         self._progress_since.pop(platform_id, None)
         log.warning("sim.stalled", record_id=record.id, platform_id=platform_id, progress=progress)
-        return await self.cancel(record.id)
+        try:
+            return await self.cancel(record.id)
+        except BrainError as exc:
+            # BRAIN cannot stop what it has stuck on: let it go here, so the core is free.
+            log.warning("sim.stall_abandoned", record_id=record.id, error=str(exc))
+            return await self._apply_terminal(
+                record, Outcome("gone", SimStatus.ERROR, message=STALLED)
+            )
 
     async def read(self, platform_id: str) -> tuple[Outcome, dict[str, Any]] | None:
         """Read one simulation if a read is due: what it means, and the body it came in.
