@@ -2326,6 +2326,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/template-lab/operator-docs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Operator Docs
+         * @description Every operator on this account with its full documentation, read from BRAIN once and
+         *     kept; ``refresh`` reads every page again.
+         */
+        get: operations["operator_docs_api_template_lab_operator_docs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/template-lab/options": {
         parameters: {
             query?: never;
@@ -3824,6 +3845,15 @@ export interface components {
             /** Unmeasured */
             unmeasured: number;
         };
+        /** DocBlock */
+        DocBlock: {
+            /** Text */
+            text: string;
+            /** Type */
+            type: string;
+            /** Url */
+            url?: string | null;
+        };
         /** DropResult */
         DropResult: {
             /** Dropped */
@@ -4981,6 +5011,27 @@ export interface components {
             description: string;
             /** Name */
             name: string;
+        };
+        /**
+         * OperatorPage
+         * @description An operator with its documentation page: the reference's "Show more".
+         */
+        OperatorPage: {
+            /** Blocks */
+            blocks: components["schemas"]["DocBlock"][];
+            /** Category */
+            category: string;
+            /** Definition */
+            definition: string;
+            /** Description */
+            description: string;
+            /** Name */
+            name: string;
+        };
+        /** OperatorPages */
+        OperatorPages: {
+            /** Operators */
+            operators: components["schemas"]["OperatorPage"][];
         };
         /** OperatorsRead */
         OperatorsRead: {
@@ -10645,6 +10696,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TasksSummary"];
+                };
+            };
+        };
+    };
+    operator_docs_api_template_lab_operator_docs_get: {
+        parameters: {
+            query?: {
+                refresh?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperatorPages"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

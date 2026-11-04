@@ -188,6 +188,12 @@ class BrainEndpoints:
         raw = r.body if isinstance(r.body, list) else []
         return [Operator.model_validate(o) for o in raw]
 
+    async def operator_page(self, path: str) -> dict[str, Any]:
+        """The documentation page an operator's ``documentation`` path names: the reference's
+        "Show more", with argument details, formulas, tables and example simulations."""
+        r = await self.client.request_retrying("GET", path)
+        return r.body if isinstance(r.body, dict) else {}
+
     # -- simulations -----------------------------------------------------
 
     async def create_simulation(

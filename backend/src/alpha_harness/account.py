@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 import structlog
 from sqlalchemy import select
 
+from .brain import operator_docs
 from .brain.auth import Authenticator, SessionInfo
 from .brain.endpoints import SIMULATION_TYPES
 from .brain.errors import BrainError
@@ -382,6 +383,31 @@ class PlatformMetadata:
 
     async def cached_operators(self) -> list[dict[str, Any]] | None:
         cached = await self._read_cache("operators")
+        return cached.get("items") if cached else None
+
+    async def refresh_operator_docs(self) -> dict[str, list[dict[str, str]]]:
+        """Every operator's documentation page, as blocks, by operator name.
+
+        One request an operator, so it is read on demand, not at sign-in. A page BRAIN will
+        not give is logged and left out; the rest are still kept.
+        """
+        operators = await self.cached_operators() or await self.refresh_operators()
+        docs: dict[str, list[dict[str, str]]] = {}
+        for operator in operators:
+            name, path = operator.get("name"), operator.get("documentation")
+            if not name or not path:
+                continue
+            try:
+                page = await self.endpoints.operator_page(str(path))
+            except BrainError:
+                log.warning("operator_docs.page_failed", operator=name, exc_info=True)
+                continue
+            docs[str(name)] = operator_docs.blocks(page)
+        await self._cache("operator_docs", {"items": docs})
+        return docs
+
+    async def cached_operator_docs(self) -> dict[str, list[dict[str, str]]] | None:
+        cached = await self._read_cache("operator_docs")
         return cached.get("items") if cached else None
 
     async def _cache(self, key: str, value: dict[str, Any]) -> None:

@@ -125,6 +125,24 @@ class OperatorDoc(Out):
     description: str
 
 
+class DocBlock(Out):
+    #: ``text``, ``table``, ``equation``, ``example`` or ``image``.
+    type: str
+    text: str
+    #: An image's address: its formula is drawn, not written.
+    url: str | None = None
+
+
+class OperatorPage(OperatorDoc):
+    """An operator with its documentation page: the reference's "Show more"."""
+
+    blocks: list[DocBlock]
+
+
+class OperatorPages(Out):
+    operators: list[OperatorPage]
+
+
 class TemplateLabOptions(Out):
     operators: OperatorsRead
     #: Every operator a template can call, for the editor's completions and hovers.
@@ -249,6 +267,30 @@ async def options(state: State, refresh: bool = False) -> TemplateLabOptions:
             "presets": template.PRESETS,
             "vector": list(search.catalogue(operators).vector),
             "maxSimulations": search.MAX_SIMULATIONS,
+        }
+    )
+
+
+@router.get("/operator-docs")
+async def operator_docs(state: State, refresh: bool = False) -> OperatorPages:
+    """Every operator on this account with its full documentation, read from BRAIN once and
+    kept; ``refresh`` reads every page again."""
+    operators = await account_operators(state, refresh=refresh)
+    docs = None if refresh else await state.metadata.cached_operator_docs()
+    if docs is None:
+        docs = await state.metadata.refresh_operator_docs()
+    return OperatorPages.model_validate(
+        {
+            "operators": [
+                {
+                    "name": o["name"],
+                    "category": str(o.get("category") or ""),
+                    "definition": str(o.get("definition") or ""),
+                    "description": str(o.get("description") or ""),
+                    "blocks": docs.get(str(o["name"])) or [],
+                }
+                for o in sorted(operators, key=lambda o: (str(o.get("category")), o["name"]))
+            ]
         }
     )
 
