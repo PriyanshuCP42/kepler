@@ -11,6 +11,9 @@ BRAIN publishes the themes in a help article, not its API, but lists them in eve
 ``MATCHES_THEMES`` check, simulated or submission-checked: ``{"id", "name", "multiplier"}``,
 named like ``GLB/D1 Power Pool Nov`26`` or ``ASI/D1 MINVOL10M Theme``. They are read from the
 newest alphas, so the month's change is picked up by itself.
+
+What a theme asks beyond its market (November 2026's GLB theme: Americas Sharpe above 1) is
+in the article alone, so it is written down here, in :data:`CONDITIONS`.
 """
 
 from __future__ import annotations
@@ -40,6 +43,14 @@ REGULAR_LIMITS = frozenset(
         "HIGH_TURNOVER",
     }
 )
+#: What a theme asks beyond its market, from BRAIN's help article "Current month Power Pool
+#: Themes": the checks an alpha must clear to be in it, keyed by the theme's name as
+#: :func:`parse` gives it. BRAIN refuses a pure Power Pool alpha that misses one with "does not
+#: match any Power Pool Theme". A theme not listed asks for its market alone, so last month's
+#: entries are simply never matched again.
+CONDITIONS: dict[str, tuple[str, ...]] = {
+    "GLB/D1 Power Pool Nov'26": ("LOW_GLB_AMER_SHARPE",),
+}
 _NAME = re.compile(r"^\s*([A-Z]{3})\s*/\s*D(\d)\b\s*(.*)$")
 #: Words of a theme's name that say nothing about the market it covers.
 _PLAIN = frozenset({"POWER", "POOL", "THEME"})
@@ -54,17 +65,27 @@ class Theme:
     delay: int | None
     #: What else the name narrows it to, e.g. ``MINVOL10M``, which is an ASI universe.
     qualifier: str | None
+    #: The checks it asks an alpha to clear beyond its market: :data:`CONDITIONS`.
+    requires: tuple[str, ...] = ()
 
-    def covers(self, region: Any, delay: Any, universe: Any = None) -> bool:
+    def covers(
+        self,
+        region: Any,
+        delay: Any,
+        universe: Any = None,
+        checks: list[dict[str, Any]] | None = None,
+    ) -> bool:
         """Whether an alpha in this market is in the theme. A qualifier that names a universe
-        (one word of capitals and digits) must match the alpha's universe when it is known."""
+        (one word of capitals and digits) must match the alpha's universe when it is known,
+        and the alpha must not miss any check the theme :attr:`requires`. One its checks do not
+        report (a quick simulation's few) is not held against it."""
         if self.region is None or str(region) != self.region:
             return False
         if delay is None or int(delay) != self.delay:
             return False
-        if self.universe and universe:
-            return str(universe).upper() == self.universe
-        return True
+        if self.universe and universe and str(universe).upper() != self.universe:
+            return False
+        return not missed(checks or [], self.requires)
 
     @property
     def universe(self) -> str | None:
@@ -94,6 +115,7 @@ def parse(raw: dict[str, Any]) -> Theme | None:
         region=region,
         delay=delay,
         qualifier=" ".join(extra) or None,
+        requires=CONDITIONS.get(name.replace("`", "'"), ()),
     )
 
 
@@ -110,20 +132,25 @@ def from_checks(checks: list[dict[str, Any]]) -> list[Theme]:
     return found
 
 
-def needs_power_pool(checks: list[dict[str, Any]]) -> list[str]:
-    """The regular limits this alpha misses, warned or refused: what only Power Pool forgives."""
-    missed: list[str] = []
+def missed(checks: list[dict[str, Any]], names: frozenset[str] | tuple[str, ...]) -> list[str]:
+    """Which of ``names`` this alpha misses, warned or refused, by value against limit."""
+    out: list[str] = []
     for check in checks:
         name = str(check.get("name", "")).upper()
         result = str(check.get("result", "")).upper()
-        if name not in REGULAR_LIMITS or result not in ("FAIL", "WARNING", "ERROR"):
+        if name not in names or result not in ("FAIL", "WARNING", "ERROR"):
             continue
         value, limit = check.get("value"), check.get("limit")
         if not isinstance(value, int | float) or not isinstance(limit, int | float):
             continue
         if (value < limit) if name.startswith("LOW_") else (value > limit):
-            missed.append(name)
-    return missed
+            out.append(name)
+    return out
+
+
+def needs_power_pool(checks: list[dict[str, Any]]) -> list[str]:
+    """The regular limits this alpha misses, warned or refused: what only Power Pool forgives."""
+    return missed(checks, REGULAR_LIMITS)
 
 
 def is_power_pool(checks: list[dict[str, Any]]) -> bool:
@@ -143,7 +170,9 @@ def takeable(row: dict[str, Any], themes: list[Theme]) -> bool:
         return False
     if not themes:
         return True
-    return any(t.covers(row.get("region"), row.get("delay"), row.get("universe")) for t in themes)
+    return any(
+        t.covers(row.get("region"), row.get("delay"), row.get("universe"), checks) for t in themes
+    )
 
 
 class Themes:

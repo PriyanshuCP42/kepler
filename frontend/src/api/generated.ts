@@ -6984,6 +6984,8 @@ export interface components {
             qualifier: string | null;
             /** Region */
             region: string | null;
+            /** Requires */
+            requires?: string[];
         };
         /** ThreadScope */
         ThreadScope: {

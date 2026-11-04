@@ -209,6 +209,8 @@ class ThemeOut(Out):
     region: str | None
     delay: int | None
     qualifier: str | None
+    #: The checks it asks an alpha to clear beyond its market.
+    requires: list[str] = Field(default_factory=list)
 
 
 class PowerPoolRoute(Out):
@@ -600,9 +602,9 @@ def judge(
     if route is not None and route.missed and route.theme is None:
         return "off_theme", [
             f"Misses the regular limits ({', '.join(route.missed)}), so BRAIN takes it only as "
-            "a pure Power Pool alpha, and no Power Pool theme covers its market this month. "
-            "Held, not dropped: it becomes submittable as it is in a month whose theme covers "
-            "its market."
+            "a pure Power Pool alpha, and no Power Pool theme covers it this month: none covers "
+            "its market, or it misses a check the theme asks for beyond it. Held, not dropped: "
+            "it becomes submittable as it is in a month whose theme covers it."
         ]
     if submission is not None and submission.status == "fails":
         failed = "; ".join(_check_text(c) for c in submission.failing)
@@ -923,7 +925,7 @@ async def desk(state: State) -> Desk:
             (
                 t
                 for t in month_themes
-                if t.covers(row.get("region"), row.get("delay"), row.get("universe"))
+                if t.covers(row.get("region"), row.get("delay"), row.get("universe"), live)
             ),
             None,
         )

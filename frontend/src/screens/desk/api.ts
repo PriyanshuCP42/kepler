@@ -124,6 +124,8 @@ export interface PowerPoolTheme {
   region: string | null
   delay: number | null
   qualifier: string | null
+  /** The checks it asks an alpha to clear beyond its market. */
+  requires: string[]
 }
 
 /** How BRAIN can take an alpha: regular, or only as pure Power Pool in a theme market. */

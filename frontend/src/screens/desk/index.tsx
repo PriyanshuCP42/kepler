@@ -267,7 +267,7 @@ function ThemeStrip({ themes }: { themes: PowerPoolTheme[] | undefined }) {
       {themes.map((t) => (
         <Tooltip
           key={t.id}
-          content={`${t.name}. An alpha under the regular limits is taken only as pure Power Pool, with a description of 100+ characters, in a theme's market${t.qualifier ? ` (${t.qualifier})` : ''}.`}
+          content={`${t.name}. An alpha under the regular limits is taken only as pure Power Pool, with a description of 100+ characters, in a theme's market${t.qualifier ? ` (${t.qualifier})` : ''}${t.requires?.length ? `, clearing ${t.requires.join(', ')}` : ''}.`}
         >
           <span className="inline-flex items-center gap-1.5 rounded-pill bg-surface-3 px-2.5 py-0.5">
             <span className="num text-ink">

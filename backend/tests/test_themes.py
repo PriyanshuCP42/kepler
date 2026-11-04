@@ -50,6 +50,17 @@ def test_a_pure_power_pool_alpha_needs_a_theme_market():
     assert themes.takeable(glb, _themes())
 
 
+def test_a_theme_holds_an_alpha_that_misses_what_it_asks_beyond_the_market():
+    glb, asi = _themes()
+    assert glb.requires == ("LOW_GLB_AMER_SHARPE",) and asi.requires == ()
+    weak = {"name": "LOW_GLB_AMER_SHARPE", "result": "FAIL", "value": 0.62, "limit": 1}
+    warned = {**weak, "result": "WARNING"}
+    strong = {"name": "LOW_GLB_AMER_SHARPE", "result": "PASS", "value": 1.21, "limit": 1}
+    for check, takeable in ((weak, False), (warned, False), (strong, True)):
+        row = {"region": "GLB", "delay": 1, "checks": json.dumps([SHARPE_WARN, POWER_POOL, check])}
+        assert themes.takeable(row, _themes()) is takeable
+
+
 def test_under_the_limits_and_not_power_pool_is_never_takeable():
     row = {"region": "GLB", "delay": 1, "checks": json.dumps([SHARPE_WARN])}
     assert not themes.takeable(row, _themes())
