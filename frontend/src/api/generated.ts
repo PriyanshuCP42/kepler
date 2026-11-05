@@ -1274,6 +1274,9 @@ export interface paths {
          * Osmosis Apply
          * @description Set these scopes' Osmosis points on BRAIN as proposed: each Alpha whose points differ
          *     is edited, those left out set to 0. Only on your click; never submits anything.
+         *
+         *     BRAIN refuses points on some Alphas without saying why. Each refused one is remembered and
+         *     left out, and the scope is planned and set again without it, so its points still add up.
          */
         post: operations["osmosis_apply_api_genius_osmosis_apply_post"];
         delete?: never;

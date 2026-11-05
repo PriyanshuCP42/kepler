@@ -336,6 +336,8 @@ SCHEMA_MAX_AGE = timedelta(hours=1)
 #: new markets simply do not appear, and the release looks broken. Measured on the release
 #: that added region-agnostic simulations.
 SCHEMA_KEY = f"settings_schema:{'+'.join(SIMULATION_TYPES)}"
+#: Alphas BRAIN refused Osmosis points on, left out of every proposal after.
+OSMOSIS_REFUSED_KEY = "osmosis_refused"
 
 
 class PlatformMetadata:
@@ -409,6 +411,16 @@ class PlatformMetadata:
     async def cached_operator_docs(self) -> dict[str, list[dict[str, str]]] | None:
         cached = await self._read_cache("operator_docs")
         return cached.get("items") if cached else None
+
+    async def osmosis_refused(self) -> set[str]:
+        """Alphas BRAIN has refused Osmosis points on. It names no reason: measured, every
+        Alpha it refused was months older than every one it took."""
+        cached = await self._read_cache(OSMOSIS_REFUSED_KEY)
+        return set(cached.get("items") or []) if cached else set()
+
+    async def add_osmosis_refused(self, alpha_ids: list[str]) -> None:
+        refused = await self.osmosis_refused() | set(alpha_ids)
+        await self._cache(OSMOSIS_REFUSED_KEY, {"items": sorted(refused)})
 
     async def _cache(self, key: str, value: dict[str, Any]) -> None:
         async with self.db.session() as session:

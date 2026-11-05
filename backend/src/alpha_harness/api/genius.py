@@ -8,6 +8,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from ..agents import genius, master, osmosis
+from ..brain.errors import BrainValidationError
 from ..db.models import GeniusReading
 from ..schemas import Out
 from .deps import State, refuse
@@ -225,6 +226,10 @@ class OsmosisApply(BaseModel):
     scopes: list[str] = Field(min_length=1, max_length=20)
 
 
+#: Times a scope is planned and set again after BRAIN refuses points on some of its Alphas.
+OSMOSIS_ROUNDS = 3
+
+
 class OsmosisApplied(Out):
     changed: int
     failed: list[str]
@@ -232,7 +237,8 @@ class OsmosisApplied(Out):
 
 
 async def _osmosis(state: State) -> tuple[list[osmosis.Scope], dict[str, int]]:
-    members = await state.alphas.submitted_members()
+    refused = await state.metadata.osmosis_refused()
+    members = [m for m in await state.alphas.submitted_members() if m["alpha_id"] not in refused]
     series = await state.alphas.series([str(m["alpha_id"]) for m in members])
     current = await state.endpoints.osmosis_points()
     return osmosis.plan(members, series, current), current
@@ -303,25 +309,47 @@ async def osmosis_plan(state: State) -> OsmosisView:
 @router.post("/osmosis/apply")
 async def osmosis_apply(body: OsmosisApply, state: State) -> OsmosisApplied:
     """Set these scopes' Osmosis points on BRAIN as proposed: each Alpha whose points differ
-    is edited, those left out set to 0. Only on your click; never submits anything."""
+    is edited, those left out set to 0. Only on your click; never submits anything.
+
+    BRAIN refuses points on some Alphas without saying why. Each refused one is remembered and
+    left out, and the scope is planned and set again without it, so its points still add up.
+    """
     if not state.auth.session.authenticated:
         raise refuse(409, "signed_out", "Sign in to BRAIN to set Osmosis points.")
-    scopes, current = await _osmosis(state)
     wanted = {name.upper() for name in body.scopes}
-    chosen = [s for s in scopes if f"{s.region}/{s.delay}" in wanted and s.eligible and s.picks]
-    if not chosen:
-        raise refuse(422, "nothing_to_apply", "None of those scopes has a proposal to apply.")
     changed, failed = 0, []
-    for scope in chosen:
-        for pick in scope.picks:
-            if current.get(pick.alpha_id, 0) == pick.points:
-                continue
-            try:
-                await state.endpoints.update_alpha(pick.alpha_id, {"osmosisPoints": pick.points})
-                changed += 1
-            except Exception as exc:  # noqa: BLE001
-                log.warning("osmosis.apply_failed", alpha_id=pick.alpha_id, error=str(exc))
-                failed.append(pick.alpha_id)
+    for attempt in range(OSMOSIS_ROUNDS):
+        scopes, current = await _osmosis(state)
+        chosen = [s for s in scopes if f"{s.region}/{s.delay}" in wanted and s.eligible and s.picks]
+        if not chosen:
+            if attempt == 0:
+                raise refuse(
+                    422, "nothing_to_apply", "None of those scopes has a proposal to apply."
+                )
+            break
+        refused: list[str] = []
+        for scope in chosen:
+            for pick in scope.picks:
+                if current.get(pick.alpha_id, 0) == pick.points:
+                    continue
+                try:
+                    await state.endpoints.update_alpha(
+                        pick.alpha_id, {"osmosisPoints": pick.points}
+                    )
+                    changed += 1
+                except BrainValidationError as exc:
+                    # BRAIN's 400: it will not take points on this Alpha, now or on a retry.
+                    log.warning(
+                        "osmosis.refused", alpha_id=pick.alpha_id, detail=exc.fields or exc.body
+                    )
+                    refused.append(pick.alpha_id)
+                except Exception as exc:  # noqa: BLE001 - a blip: reported, not remembered
+                    log.warning("osmosis.apply_failed", alpha_id=pick.alpha_id, error=str(exc))
+                    failed.append(pick.alpha_id)
+        if not refused:
+            break
+        failed += refused
+        await state.metadata.add_osmosis_refused(refused)
     scopes, _ = await _osmosis(state)
     return OsmosisApplied(changed=changed, failed=failed, view=_osmosis_view(scopes))
 
