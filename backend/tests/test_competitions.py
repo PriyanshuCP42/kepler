@@ -34,9 +34,10 @@ def _state():
         _member("glbPass", "GLB", ["PowerPoolSelected"], sharpe=1.4),
         _member("glbFail", "GLB", ["PowerPoolSelected"], sharpe=2.0),
         _member("glbUntagged", "GLB", []),
+        {**_member("glbEarly", "GLB", ["PowerPoolSelected"]), "date_submitted": "2026-09-01"},
         _member("usaAqp", "USA", ["AQP202611"], classes=("Regular Alpha",)),
     ]
-    checks = {"glbPass": AMER_PASS, "glbFail": AMER_FAIL}
+    checks = {"glbPass": AMER_PASS, "glbFail": AMER_FAIL, "glbEarly": AMER_PASS}
 
     async def listed():
         return [
@@ -93,5 +94,7 @@ def test_a_theme_lists_tagged_power_pool_alphas_in_its_market_and_which_match():
     assert [(e.alpha_id, e.matches) for e in theme.entries] == [
         ("glbPass", True),
         ("glbFail", False),
+        ("glbEarly", False),
     ]
     assert theme.entries[1].missing == ["LOW_GLB_AMER_SHARPE"]
+    assert theme.entries[2].missing == [competitions.BEFORE_THEME]

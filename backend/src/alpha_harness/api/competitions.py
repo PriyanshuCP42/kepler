@@ -96,6 +96,10 @@ def _entry(row: dict[str, Any], **extra: Any) -> Entry:
     )
 
 
+#: An Alpha submitted before its theme began, so it does not count towards it.
+BEFORE_THEME = "SUBMITTED_BEFORE_THEME"
+
+
 async def _themes(state: State, members: list[dict[str, Any]]) -> list[ThemeTab]:
     source = getattr(state, "themes", None)
     found = await source.current() if source is not None else []
@@ -110,21 +114,23 @@ async def _themes(state: State, members: list[dict[str, Any]]) -> list[ThemeTab]
     stored = await state.alphas.by_ids([str(m["alpha_id"]) for m in tagged])
     tabs: list[ThemeTab] = []
     for theme in found:
+        window = theme_rules.WINDOWS.get(theme.name)
         entries: list[Entry] = []
         for m in tagged:
             if m.get("region") != theme.region or m.get("delay") != theme.delay:
                 continue
             checks = checks_of((stored.get(str(m["alpha_id"])) or {}).get("checks"))
-            entries.append(
-                _entry(
-                    m,
-                    matches=theme.covers(
-                        m.get("region"), m.get("delay"), m.get("universe"), checks
-                    ),
-                    missing=theme_rules.missed(checks, theme.requires),
-                )
+            missing = theme_rules.missed(checks, theme.requires)
+            # BRAIN's FAQ: from the theme's start date, a matching Alpha "can be submitted and
+            # tagged and will contribute"; one submitted before it does not.
+            submitted = str(m.get("date_submitted") or "")[:10]
+            if window and submitted and submitted < window[0]:
+                missing = [*missing, BEFORE_THEME]
+            matches = (
+                theme.covers(m.get("region"), m.get("delay"), m.get("universe"), checks)
+                and BEFORE_THEME not in missing
             )
-        window = theme_rules.WINDOWS.get(theme.name)
+            entries.append(_entry(m, matches=matches, missing=missing))
         tabs.append(
             ThemeTab(
                 id=theme.id,

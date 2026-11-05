@@ -45,6 +45,7 @@ const themeKey = (t: ThemeTab) => `theme-${t.id.toLowerCase()}`
 
 const CHECK_LABEL: Record<string, string> = {
   LOW_GLB_AMER_SHARPE: 'Americas Sharpe above 1',
+  SUBMITTED_BEFORE_THEME: 'submitted before the theme began',
 }
 
 function Entries({ entries, theme }: { entries: Entry[]; theme?: boolean }) {
@@ -205,7 +206,7 @@ function ThemeTabBody({ theme: t }: { theme: ThemeTab }) {
       </Panel>
       <Panel
         title="Your Power Pool Alphas in This Market"
-        description={`Tagged PowerPoolSelected. Awards need at least ${t.minForAwards} tagged, theme-matching Alphas when the theme ends.`}
+        description={`Tagged PowerPoolSelected. Only Alphas submitted after the theme began count; awards need at least ${t.minForAwards} tagged, theme-matching Alphas when it ends.`}
       >
         <Entries entries={t.entries} theme />
       </Panel>
