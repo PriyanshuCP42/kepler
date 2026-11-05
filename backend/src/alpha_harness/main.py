@@ -39,6 +39,7 @@ from .api import (
     hypotheses,
     lab_tasks,
     llm,
+    playbook,
     portfolio,
     power_pool_lab,
     preferences,
@@ -183,6 +184,7 @@ def create_app() -> FastAPI:
     app.include_router(portfolio.router)
     app.include_router(desk.router)
     app.include_router(genius.router)
+    app.include_router(playbook.router)
     app.include_router(hypotheses.router)
     app.include_router(quarter.router)
     app.include_router(tasks.router)

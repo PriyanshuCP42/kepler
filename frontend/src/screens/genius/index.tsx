@@ -21,6 +21,7 @@ import {
   OSMOSIS_KEY,
   type OsmosisScope,
 } from '@/screens/genius/api'
+import { PlaybookPanel } from '@/screens/playbook/insight'
 import {
   Button,
   Empty,
@@ -86,6 +87,7 @@ export function GeniusScreen() {
           <ReadingsPanel data={data} />
         </>
       )}
+      <PlaybookPanel place="genius" />
     </Page>
   )
 }

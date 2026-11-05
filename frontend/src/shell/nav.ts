@@ -1,5 +1,6 @@
 import {
   AwardIcon,
+  BookOpenIcon,
   Building2Icon,
   ChartPieIcon,
   DatabaseIcon,
@@ -77,6 +78,12 @@ export const NAV = [
     group: '',
     label: 'Genius Tracker',
     icon: AwardIcon,
+  },
+  {
+    to: '/playbook',
+    group: '',
+    label: 'Playbook',
+    icon: BookOpenIcon,
   },
   {
     to: '/dashboard',

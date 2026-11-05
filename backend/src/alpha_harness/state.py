@@ -26,6 +26,7 @@ from .agents.guard import Guard
 from .agents.hypothesis import HypothesisWriter
 from .agents.master import MasterTracker
 from .agents.overlap import Overlap
+from .agents.playbook import Playbook
 from .agents.repair import RepairEngineer
 from .agents.screener import Screener
 from .agents.strategist import Strategist
@@ -150,7 +151,8 @@ class AppState:
 
         self.models = ModelRegistry(self.db)
         self.llm = LLMService(self.db, self.sealer, self.models)
-        self.chat = ChatService(self.db, self.llm, self.queries)
+        self.playbook = Playbook(self.settings.data_dir)
+        self.chat = ChatService(self.db, self.llm, self.queries, self.playbook)
         self.optimizer = Optimizer(
             self.db,
             self.engine,

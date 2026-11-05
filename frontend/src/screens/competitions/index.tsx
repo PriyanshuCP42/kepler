@@ -8,6 +8,7 @@ import { ExternalLinkIcon, TrophyIcon } from 'lucide-react'
 import { type Competition, competitions } from '@/api/core'
 import { PLATFORM_COMPETITIONS_URL } from '@/api/platform'
 import { fmt } from '@/lib/format'
+import { PlaybookPanel } from '@/screens/playbook/insight'
 import {
   Badge,
   Button,
@@ -121,6 +122,7 @@ export function CompetitionsScreen() {
           </ul>
         </Disclosure>
       )}
+      <PlaybookPanel place="competitions" />
     </Page>
   )
 }

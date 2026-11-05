@@ -1917,6 +1917,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/playbook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search
+         * @description Insights for a question (BM25), a topic or a screen; with none, the newest first.
+         */
+        get: operations["search_api_playbook_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/playbook/{insight_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save
+         * @description Add an insight, or replace the one with this id.
+         */
+        put: operations["save_api_playbook__insight_id__put"];
+        post?: never;
+        /** Remove */
+        delete: operations["remove_api_playbook__insight_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/portfolio/compute": {
         parameters: {
             query?: never;
@@ -4477,6 +4518,55 @@ export interface components {
             /** Window */
             window: string;
         };
+        /** InsightIn */
+        InsightIn: {
+            /** Actions */
+            actions?: string[];
+            /**
+             * Date
+             * @default
+             */
+            date: string;
+            /** Figures */
+            figures?: string[][];
+            /** Places */
+            places?: string[];
+            /** Points */
+            points?: string[];
+            /** Source */
+            source: string;
+            /** Summary */
+            summary: string;
+            /** Title */
+            title: string;
+            /** Topics */
+            topics?: string[];
+        };
+        /** InsightOut */
+        InsightOut: {
+            /** Actions */
+            actions: string[];
+            /** Date */
+            date: string;
+            /** Figures */
+            figures: string[][];
+            /** Id */
+            id: string;
+            /** Places */
+            places: string[];
+            /** Points */
+            points: string[];
+            /** Score */
+            score?: number | null;
+            /** Source */
+            source: string;
+            /** Summary */
+            summary: string;
+            /** Title */
+            title: string;
+            /** Topics */
+            topics: string[];
+        };
         /** KeyFailed */
         KeyFailed: {
             /** Error */
@@ -5237,6 +5327,19 @@ export interface components {
             id: number;
             /** Name */
             name: string;
+        };
+        /** PlaybookView */
+        PlaybookView: {
+            /** Insights */
+            insights: components["schemas"]["InsightOut"][];
+            /** Path */
+            path: string;
+            /** Places */
+            places: string[];
+            /** Topics */
+            topics: string[];
+            /** Total */
+            total: number;
         };
         /** PortfolioMember */
         PortfolioMember: {
@@ -10122,6 +10225,104 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["OfferedModels"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_api_playbook_get: {
+        parameters: {
+            query?: {
+                q?: string;
+                topic?: string | null;
+                place?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaybookView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_api_playbook__insight_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                insight_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InsightIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InsightOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_api_playbook__insight_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                insight_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

@@ -19,11 +19,13 @@ from typing import TYPE_CHECKING, Any, Literal
 import structlog
 from sqlalchemy import select
 
+from ..agents.playbook import notes
 from ..db.models import ChatMessage, ChatThread, utcnow
 from .prompts import ASSISTANT
 from .text import CHARS_PER_TOKEN, clip, loads_or
 
 if TYPE_CHECKING:
+    from ..agents.playbook import Playbook
     from ..catalog.queries import CatalogQueries, Tuple4
     from ..db.sqlite import Database
     from .service import LLMService
@@ -97,10 +99,19 @@ FIELD_PICK_SCHEMA: dict[str, Any] = {
 class ChatService:
     """Conversations, and the field picks they produce."""
 
-    def __init__(self, db: Database, llm: LLMService, queries: CatalogQueries) -> None:
+    def __init__(
+        self,
+        db: Database,
+        llm: LLMService,
+        queries: CatalogQueries,
+        playbook: Playbook | None = None,
+    ) -> None:
         self.db = db
         self.llm = llm
         self.queries = queries
+        #: WorldQuant's guidance and this account's lessons; the best matches for each message
+        #: ride along in the same prompt, so they cost tokens, never an extra call.
+        self.playbook = playbook
 
     # -- threads ---------------------------------------------------------
 
@@ -178,12 +189,16 @@ class ChatService:
         info = self.llm.model_for(model)
         transcript = _transcript(history)
         message = f"THEIR MESSAGE:\n{text}"
+        guidance = notes(self.playbook, text)
+        if guidance:
+            guidance = "PLAYBOOK (WorldQuant's guidance and this account's lessons):\n" + guidance
         # The fields get what the model's prompt allows once everything else is in.
         room = (
             info.prompt_tokens * CHARS_PER_TOKEN
             - len(ASSISTANT)
             - len(transcript)
             - len(message)
+            - len(guidance)
             - 200
         )
         fields, available, catalog_note = await self._field_menu(scope, dataset_ids, room)
@@ -194,7 +209,14 @@ class ChatService:
             )
 
         prompt = "\n\n---\n\n".join(
-            [f"DATA FIELDS AVAILABLE IN {scope.label}:\n{fields}", transcript, message]
+            part
+            for part in (
+                f"DATA FIELDS AVAILABLE IN {scope.label}:\n{fields}",
+                guidance,
+                transcript,
+                message,
+            )
+            if part
         )
 
         answer = await self.llm.generate(

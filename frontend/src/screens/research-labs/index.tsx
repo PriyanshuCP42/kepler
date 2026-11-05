@@ -10,6 +10,7 @@ import {
   SearchIcon,
   ZapIcon,
 } from 'lucide-react'
+import { PlaybookPanel } from '@/screens/playbook/insight'
 import { LAB_TABS } from '@/shell/nav'
 import { Page, PageHeader } from '@/ui/kit'
 
@@ -83,6 +84,7 @@ export function ResearchLabsScreen() {
           </Link>
         ))}
       </div>
+      <PlaybookPanel place="labs" />
     </Page>
   )
 }

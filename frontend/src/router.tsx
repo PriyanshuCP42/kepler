@@ -48,6 +48,12 @@ const geniusRoute = createRoute({
   component: lazyRouteComponent(() => import('@/screens/genius'), 'GeniusScreen'),
 })
 
+const playbookRoute = createRoute({
+  getParentRoute: () => root,
+  path: '/playbook',
+  component: lazyRouteComponent(() => import('@/screens/playbook'), 'PlaybookScreen'),
+})
+
 const dashboard = createRoute({
   getParentRoute: () => root,
   path: '/dashboard',
@@ -239,6 +245,7 @@ const routeTree = root.addChildren([
   autopilot,
   desk,
   geniusRoute,
+  playbookRoute,
   dashboard,
   matrix,
   data,

@@ -35,6 +35,7 @@ import {
   type SubmissionCheck,
   type YearSharpe,
 } from '@/screens/desk/api'
+import { PlaybookPanel } from '@/screens/playbook/insight'
 import {
   Button,
   Empty,
@@ -255,6 +256,7 @@ export function DeskScreen() {
           />
         </>
       )}
+      <PlaybookPanel place="desk" />
     </Page>
   )
 }
