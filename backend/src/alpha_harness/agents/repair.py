@@ -250,9 +250,12 @@ MOVES: tuple[Move, ...] = (
     ),
     Move(
         "hump",
-        "Skip trades under a one-percentile change",
+        "Hold positions through small changes",
         _TURNOVER | {"LOW_FITNESS"},
-        _wrap("hump(rank(alpha), hump=0.01)"),
+        # hump's limit is hump x the book's gross (group_sum(abs(alpha), market)), so 0.01
+        # all but freezes a 3,000-stock alpha. Measured: 0.0005 kept Sharpe (1.40 to 1.39),
+        # 0.002 cost a fifth of it (1.40 to 1.10).
+        _wrap("hump(alpha, hump=0.001)"),
         slide_prior("hump"),
     ),
     Move(

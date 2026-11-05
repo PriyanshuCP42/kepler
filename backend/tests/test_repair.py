@@ -117,7 +117,7 @@ def test_slide_backed_smoothers_wrap_the_original():
     for move_id, call in (
         ("target_tvr_hump", "ts_target_tvr_hump" + target),
         ("target_tvr_decay", "ts_target_tvr_decay" + target),
-        ("hump", "hump(rank(alpha), hump=0.01)"),
+        ("hump", "hump(alpha, hump=0.001)"),
         ("group_backfill", "group_backfill(alpha, industry, 21)"),
     ):
         expression, settings = repair.BY_ID[move_id].apply("rank(close)", BASE, OPTIONS)
