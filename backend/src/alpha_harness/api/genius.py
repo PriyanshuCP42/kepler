@@ -273,6 +273,7 @@ def _osmosis_view(scopes: list[osmosis.Scope]) -> OsmosisView:
             f"{valid_now} of your scopes hold a valid allocation now, so the Daily Osmosis Rank "
             "is not generated and Combined Osmosis Performance cannot build."
         )
+    advice += osmosis.shortlist_gaps(scopes)
     return OsmosisView(
         locks_at=osmosis.next_lock().isoformat(),
         min_scopes=osmosis.MIN_SCOPES,

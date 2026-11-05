@@ -45,6 +45,63 @@ MIN_RECENT_SHARPE = 0.5
 FILLER_WEIGHT = 0.1
 _EST = ZoneInfo("America/New_York")
 
+# -- WorldQuant's full-time shortlist ----------------------------------------------------
+#
+# From WorldQuant's slide "Osmosis Score: Criteria to shortlist consultants for full-time
+# roles" (BRAIN webinar, November 2026). To qualify: at least 10 Alphas, exactly 100,000
+# points and at least 3 *regions*. Of 5,799 who qualified, Combined Osmosis Sharpe was above
+# 0.5 for 480, above 1.0 for 345 and above 2.0 for 160. Qualified consultants averaged 4.20
+# scopes and 20.6 Alphas per scope. 3,182 were disqualified for points not totalling
+# 100,000, 804 for fewer than 3 scopes, 782 for fewer than 10 Alphas in a scope.
+
+#: Distinct regions the shortlist asks for, on top of BRAIN's three valid scopes.
+SHORTLIST_REGIONS = 3
+#: Combined Osmosis Sharpe of the shortlist's top tier (160 of 5,799).
+SHORTLIST_SHARPE = 2.0
+#: What a qualified consultant holds on average.
+PEER_SCOPES = 4.2
+PEER_ALPHAS_PER_SCOPE = 20.6
+
+
+def shortlist_gaps(scopes: list[Scope]) -> list[str]:
+    """What stands between this allocation and WorldQuant's full-time shortlist, in plain
+    words: the disqualifications first, then the averages of those who qualified."""
+    gaps: list[str] = []
+    for s in scopes:
+        if s.current_points and s.current_points != POINTS:
+            gaps.append(
+                f"{s.region} D{s.delay} holds {s.current_points:,} points, not exactly "
+                f"{POINTS:,}: the most common shortlist disqualification (3,182 consultants)."
+            )
+        if s.current_points and s.current_alphas < MIN_ALPHAS:
+            gaps.append(
+                f"{s.region} D{s.delay} spreads its points over {s.current_alphas} Alphas; the "
+                f"shortlist needs at least {MIN_ALPHAS} in every scope."
+            )
+    valid = [s for s in scopes if s.currently_valid]
+    regions = sorted({s.region for s in valid})
+    if len(regions) < SHORTLIST_REGIONS:
+        held = ", ".join(regions) if regions else "none"
+        gaps.append(
+            f"The full-time shortlist counts at least {SHORTLIST_REGIONS} regions; your valid "
+            f"allocations cover {len(regions)} ({held}). Add a scope in a new region, not "
+            "another delay of one you hold."
+        )
+    thin = [s for s in valid if s.current_alphas < PEER_ALPHAS_PER_SCOPE]
+    if thin:
+        gaps.append(
+            f"Qualified consultants average {PEER_SCOPES} scopes and {PEER_ALPHAS_PER_SCOPE} "
+            "Alphas per scope; "
+            + ", ".join(f"{s.region} D{s.delay} holds {s.current_alphas}" for s in thin)
+            + "."
+        )
+    gaps.append(
+        f"The shortlist ranks Combined Osmosis Sharpe: of 5,799 who qualified, 160 were above "
+        f"{SHORTLIST_SHARPE}. Proposals here are steadiest by recent backtest, which stands in "
+        "for the out-of-sample PnL BRAIN keeps hidden."
+    )
+    return gaps
+
 
 @dataclass(slots=True)
 class Pick:

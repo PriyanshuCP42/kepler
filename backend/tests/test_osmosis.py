@@ -78,3 +78,28 @@ def test_the_lock_is_the_next_sunday_night_eastern():
     lock = osmosis.next_lock(friday)
     assert lock == datetime(2026, 11, 9, 4, 59, tzinfo=UTC)  # Sun 8 Nov 23:59 EST
     assert osmosis.next_lock(lock + timedelta(minutes=1)) == lock + timedelta(days=7)
+
+
+def _held(region: str, delay: int, points: int, alphas: int) -> osmosis.Scope:
+    scope = osmosis.Scope(region, delay, alphas)
+    scope.current_points, scope.current_alphas = points, alphas
+    return scope
+
+
+def test_the_shortlist_flags_points_that_do_not_total_100000():
+    gaps = osmosis.shortlist_gaps([_held("GLB", 1, 106_000, 25)])
+    assert any("106,000 points" in g for g in gaps)
+
+
+def test_the_shortlist_counts_regions_not_delays():
+    usa = [_held("USA", 1, 100_000, 25), _held("USA", 0, 100_000, 25), _held("GLB", 1, 100_000, 25)]
+    gaps = osmosis.shortlist_gaps(usa)
+    assert any("cover 2 (GLB, USA)" in g for g in gaps)
+    three = usa[:1] + usa[2:] + [_held("EUR", 1, 100_000, 25)]
+    assert not any("regions" in g for g in osmosis.shortlist_gaps(three))
+
+
+def test_a_scope_thinner_than_the_qualified_average_is_named():
+    gaps = osmosis.shortlist_gaps([_held("USA", 1, 100_000, 17)])
+    assert any("USA D1 holds 17" in g for g in gaps)
+    assert any("160 were above 2.0" in g for g in gaps)
