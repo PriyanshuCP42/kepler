@@ -3687,6 +3687,8 @@ export interface components {
             endDate: string | null;
             /** Enrolled */
             enrolled: boolean;
+            /** Entries */
+            entries?: components["schemas"]["Entry"][];
             /** Faq */
             faq: string | null;
             /** Id */
@@ -3716,6 +3718,8 @@ export interface components {
         Competitions: {
             /** Competitions */
             competitions: components["schemas"]["Competition"][];
+            /** Themes */
+            themes?: components["schemas"]["ThemeTab"][];
         };
         /** CopiedAlphas */
         CopiedAlphas: {
@@ -3957,6 +3961,30 @@ export interface components {
             slotsFree: number;
             /** Slotsused */
             slotsUsed: number;
+        };
+        /**
+         * Entry
+         * @description One of your submitted Alphas in a competition or theme.
+         */
+        Entry: {
+            /** Alphaid */
+            alphaId: string;
+            /** Datesubmitted */
+            dateSubmitted: string | null;
+            /** Delay */
+            delay: number | null;
+            /** Fitness */
+            fitness: number | null;
+            /** Matches */
+            matches?: boolean | null;
+            /** Missing */
+            missing?: string[];
+            /** Region */
+            region: string | null;
+            /** Sharpe */
+            sharpe: number | null;
+            /** Universe */
+            universe: string | null;
         };
         /**
          * EvolutionMarket
@@ -7144,6 +7172,34 @@ export interface components {
             region: string | null;
             /** Requires */
             requires?: string[];
+        };
+        /**
+         * ThemeTab
+         * @description A Power Pool theme: its market, what it asks, and your tagged Power Pool Alphas in it.
+         */
+        ThemeTab: {
+            /** Delay */
+            delay: number | null;
+            /** Enddate */
+            endDate: string | null;
+            /** Entries */
+            entries: components["schemas"]["Entry"][];
+            /** Id */
+            id: string;
+            /** Minforawards */
+            minForAwards: number;
+            /** Multiplier */
+            multiplier: number;
+            /** Name */
+            name: string;
+            /** Qualifier */
+            qualifier: string | null;
+            /** Region */
+            region: string | null;
+            /** Requires */
+            requires: string[];
+            /** Startdate */
+            startDate: string | null;
         };
         /** ThreadScope */
         ThreadScope: {

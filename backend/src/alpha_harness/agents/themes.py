@@ -51,6 +51,15 @@ REGULAR_LIMITS = frozenset(
 CONDITIONS: dict[str, tuple[str, ...]] = {
     "GLB/D1 Power Pool Nov'26": ("LOW_GLB_AMER_SHARPE",),
 }
+#: When a theme runs, by its name: BRAIN's checks name a theme but not its dates. From
+#: WorldQuant's webinar slide "GLB D1 Power Pool Theme" (November 2026): 26 October to
+#: 22 November, a week before the month ends. Its leaderboard snapshots the tagged,
+#: theme-matching alphas at the end.
+WINDOWS: dict[str, tuple[str, str]] = {
+    "GLB/D1 Power Pool Nov'26": ("2026-10-26", "2026-11-22"),
+}
+#: Tagged theme-matching Power Pool alphas a consultant needs at the snapshot to win awards.
+MIN_FOR_AWARDS = 5
 _NAME = re.compile(r"^\s*([A-Z]{3})\s*/\s*D(\d)\b\s*(.*)$")
 #: Words of a theme's name that say nothing about the market it covers.
 _PLAIN = frozenset({"POWER", "POOL", "THEME"})

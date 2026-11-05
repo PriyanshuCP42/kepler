@@ -221,9 +221,16 @@ const aiIndex = createRoute({
 const aiTab = createRoute({ getParentRoute: () => ai, path: '$tab' })
 const aiThread = createRoute({ getParentRoute: () => ai, path: 'assistant/$threadId' })
 
-const competitionsRoute = createRoute({
-  getParentRoute: () => root,
-  path: '/competitions',
+const competitionsRoute = createRoute({ getParentRoute: () => root, path: '/competitions' })
+/** Tabs come from what BRAIN is running, so the bare path shows the first and a tab has a path. */
+const competitionsIndex = createRoute({
+  getParentRoute: () => competitionsRoute,
+  path: '/',
+  component: lazyRouteComponent(() => import('@/screens/competitions'), 'CompetitionsScreen'),
+})
+const competitionsTab = createRoute({
+  getParentRoute: () => competitionsRoute,
+  path: '$tab',
   component: lazyRouteComponent(() => import('@/screens/competitions'), 'CompetitionsScreen'),
 })
 
@@ -251,7 +258,7 @@ const routeTree = root.addChildren([
   data,
   labs.addChildren([labsIndex, searchLab, templateLab, evolutionLab, powerPoolLab, superAlphaLab]),
   tools.addChildren([toolsIndex, settingsSampler, correlationBreaker, fieldsSampler]),
-  competitionsRoute,
+  competitionsRoute.addChildren([competitionsIndex, competitionsTab]),
   tasks.addChildren([tasksIndex, taskResults]),
   pool.addChildren([poolIndex, poolTab]),
   portfolio,
