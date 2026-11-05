@@ -63,6 +63,8 @@ export interface AlphaTableRow {
 
   /** A task's own: what it searches for, the trial, what refused it, which task. */
   value?: number | null
+  /** Why a quality search left this trial unscored, when it did: its value is then empty. */
+  unscored?: string[]
   trial?: number
   failedChecks?: string[]
   refusedBy?: string[]

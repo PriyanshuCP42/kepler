@@ -174,7 +174,9 @@ class RankedAlpha(Out):
     alpha_id: str | None
     expression: str | None
     settings: dict[str, Any] | None
-    value: float
+    #: The objective's score; null for a quality trial never scored, with ``unscored`` saying why.
+    value: float | None
+    unscored: list[str] = Field(default_factory=list)
     sharpe: float | None
     fitness: float | None
     turnover: float | None
@@ -347,6 +349,11 @@ async def _progress(state: Any, rows: list[Study]) -> dict[int, dict[str, Any]]:
                     Trial.state == TrialState.COMPLETE,
                     value > FAILURE,
                     or_(Trial.generation.is_(None), Trial.generation != 0),
+                    # Nor is a quality trial never scored: its 0 is the sampler's placeholder.
+                    or_(
+                        func.json_type(Trial.result, "$.quality").is_(None),
+                        func.json_extract(Trial.result, "$.quality.kRatio").is_not(None),
+                    ),
                 ),
             )
             .where(Trial.study_id.in_(ids))
@@ -872,9 +879,18 @@ async def top(
     # an Alpha, captures included. Calculate After-Cost Sharpe is the way to ask, and it says
     # how many it will fetch before it does.
     return [
-        RankedAlpha.model_validate(r | _from_vault(r["alphaId"], stored, prod))
+        RankedAlpha.model_validate(_merged(r, _from_vault(r["alphaId"], stored, prod)))
         for r in ranked(best, current)
     ]
+
+
+#: The core figures a trial's frozen reply may lack, by the name the vault and the row share.
+_FIGURES = ("sharpe", "fitness", "turnover", "returns", "drawdown", "margin")
+
+
+def _merged(row: dict[str, Any], vault: dict[str, Any]) -> dict[str, Any]:
+    """The row with the vault's additions; a core figure the row already has is kept."""
+    return row | {k: v for k, v in vault.items() if k not in _FIGURES or row.get(k) is None}
 
 
 def _from_vault(
@@ -883,6 +899,9 @@ def _from_vault(
     """What a ranked row adds from the vault and from BRAIN's correlation check."""
     vault = stored.get(alpha_id) or {}
     return {
+        # A trial's figures are BRAIN's reply at simulation time, which can come back before
+        # BRAIN has filled them all in; the vault's later read of the Alpha stands in.
+        **{k: vault.get(k) for k in _FIGURES if vault.get(k) is not None},
         "longCount": vault.get("long_count"),
         "shortCount": vault.get("short_count"),
         "afterCostSharpe": vault.get("after_cost_5bps"),
@@ -1075,8 +1094,7 @@ async def submittable_alphas(state: State) -> list[TaskAlpha]:
         task = tasks[by_trial[r["trialId"]]]
         out.append(
             TaskAlpha.model_validate(
-                r
-                | _from_vault(alpha_id, stored, prod)
+                _merged(r, _from_vault(alpha_id, stored, prod))
                 | {
                     "taskId": task.id,
                     "taskName": task.label

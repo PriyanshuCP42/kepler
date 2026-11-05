@@ -61,7 +61,14 @@ export function resultsMarkdown(task: LabTask, rows: RankedAlpha[]): string {
       metrics: [
         ...(task.objectiveLabel === 'Sharpe'
           ? []
-          : [[task.objectiveLabel, fmt.ratio(r.value)] as [string, string]]),
+          : [
+              [
+                task.objectiveLabel,
+                r.value == null && r.unscored?.length
+                  ? `not scored (${r.unscored.join(', ')})`
+                  : fmt.ratio(r.value),
+              ] as [string, string],
+            ]),
         ...coreMetrics(r),
         ['Checks', checks(r)],
       ],

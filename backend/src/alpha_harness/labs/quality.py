@@ -192,6 +192,32 @@ def score(
     )
 
 
+#: What each constraint, when it is not met, says about why a trial went unscored.
+WHY = {
+    "sharpe": f"train Sharpe under {MIN_SHARPE}",
+    "checks": "a check BRAIN refuses",
+    "margin": f"margin under {metrics.DEFAULT_COST_BPS:g} bps",
+    "pool": f"correlation with your pool over {POOL_LIMIT}",
+    "prod": f"Production Correlation over {PROD_LIMIT}",
+}
+
+
+def unscored(result: dict[str, Any]) -> list[str] | None:
+    """Why a quality trial has no K-ratio, in words; ``None`` when it has one, or is not a
+    quality trial. Its curve is read only once the cheap constraints are met, so an unmet one
+    is the reason; with all met, its daily PnL could not be read."""
+    detail = result.get("quality")
+    if not isinstance(detail, dict) or detail.get("kRatio") is not None:
+        return None
+    constraints = result.get("constraints") or []
+    why = [
+        WHY[name]
+        for name, value in zip(CONSTRAINTS, constraints, strict=False)
+        if isinstance(value, int | float) and value > 0
+    ]
+    return why or ["its daily PnL could not be read yet"]
+
+
 def prod_constraint(production: float | None) -> float:
     """The Production Correlation constraint: met while unmeasured."""
     return round(production - PROD_LIMIT, 4) if production is not None else 0.0

@@ -5987,8 +5987,10 @@ export interface components {
             trialId: number;
             /** Turnover */
             turnover: number | null;
+            /** Unscored */
+            unscored?: string[];
             /** Value */
-            value: number;
+            value: number | null;
         };
         /** @enum {string} */
         Reasoning: "quick" | "normal" | "careful" | "deep";
@@ -6945,8 +6947,10 @@ export interface components {
             trialId: number;
             /** Turnover */
             turnover: number | null;
+            /** Unscored */
+            unscored?: string[];
             /** Value */
-            value: number;
+            value: number | null;
         };
         /** TaskChange */
         TaskChange: {

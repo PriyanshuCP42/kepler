@@ -11,7 +11,7 @@ import {
 } from '@/api/platform'
 import { cn } from '@/lib/cn'
 import { CORE_METRICS, CORE_ORDER, DASH, fmt } from '@/lib/format'
-import { Badge, cutoffTone, figureTone, signTone, TEXT_TONE } from '@/ui/kit'
+import { Badge, cutoffTone, figureTone, signTone, TEXT_TONE, type Tone } from '@/ui/kit'
 import type { Column } from '@/ui/table'
 import type { AlphaTableRow, Investability } from './row'
 
@@ -72,6 +72,18 @@ export function Correlation({ value }: { value: number | null | undefined }) {
   const angles = useContext(AnglesContext)
   if (value == null) return DASH
   return angles ? `${angleOf(value).toFixed(2)}°` : fmt.ratio(value, 4)
+}
+
+/** A task's objective value; for a quality trial never scored, a dash that says why. */
+export function ObjectiveValue({ row, tone }: { row: AlphaTableRow; tone: Tone }) {
+  if (row.value == null && row.unscored?.length) {
+    return (
+      <span className="num text-ink-subtle" title={`Not scored: ${row.unscored.join(', ')}`}>
+        {DASH}
+      </span>
+    )
+  }
+  return <span className={cn('num', TEXT_TONE[tone])}>{fmt.ratio(row.value)}</span>
 }
 
 /** (Long − Short) ÷ (Long + Short) in stocks held, or null without both counts. */
@@ -233,9 +245,7 @@ export const OPTIONS: Option[] = [
     width: '112px',
     align: 'right',
     value: (r) => r.value,
-    cell: (r) => (
-      <span className={cn('num', TEXT_TONE[cutoffTone(r.value)])}>{fmt.ratio(r.value)}</span>
-    ),
+    cell: (r) => <ObjectiveValue row={r} tone={cutoffTone(r.value)} />,
   }),
   option('Summary', 'name', 'Name', {
     width: 'minmax(112px,1.5fr)',

@@ -1114,6 +1114,9 @@ def ranked(
             failed_now = [str(c.get("name")) for c in checks if c.get("result") == "FAIL"]
             result = {**result, "checks": checks, "failedChecks": failed_now}
         stats = result.get("stats") or {}
+        # A quality trial that missed a cheap constraint was never scored: its stored 0 is a
+        # placeholder for the sampler, not a K-ratio, so the row says why instead.
+        why_not = quality.unscored(result)
         rows.append(
             {
                 "trialId": t.id,
@@ -1122,7 +1125,8 @@ def ranked(
                 "alphaId": t.alpha_id,
                 "expression": t.expression,
                 "settings": t.settings,
-                "value": value,
+                "value": None if why_not is not None else value,
+                "unscored": why_not or [],
                 "sharpe": stats.get("sharpe"),
                 "fitness": stats.get("fitness"),
                 "turnover": stats.get("turnover"),

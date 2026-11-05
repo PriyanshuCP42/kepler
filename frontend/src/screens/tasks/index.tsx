@@ -18,11 +18,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { errorMessage } from '@/api/http'
 import { SUPER_ALPHA_SLOTS } from '@/api/platform'
-import { cn } from '@/lib/cn'
 import { DASH, fmt } from '@/lib/format'
 import { useNow } from '@/lib/now'
 import { useRefetchOn } from '@/lib/ws'
 import { AlphaTable, type AlphaTableRow, fromRanked, option } from '@/screens/alpha-table'
+import { ObjectiveValue } from '@/screens/alpha-table/columns'
 import { DatasetChips, useDatasetTree } from '@/screens/data/dataset-chips'
 import { alphaIds, useDetailSheet } from '@/screens/pool/detail'
 import { MAX_SIMULATIONS } from '@/screens/research-labs/lab-task'
@@ -64,11 +64,7 @@ const objective = (task: LabTask) =>
     width: '112px',
     align: 'right',
     value: (r) => r.value,
-    cell: (r) => (
-      <span className={cn('num', TEXT_TONE[objectiveTone(task, r.value, r.limits)])}>
-        {fmt.ratio(r.value)}
-      </span>
-    ),
+    cell: (r) => <ObjectiveValue row={r} tone={objectiveTone(task, r.value, r.limits)} />,
   })
 
 /** A task's objective, judged like Sharpe when it is Sharpe and one Alpha's limits are known;
