@@ -23,6 +23,8 @@ from ..brain.errors import BrainError, BrainPollTimeout, BrainRateLimited
 from ..brain.platform import (
     POWER_POOL_CORRELATION_CEILING,
     POWER_POOL_ESCAPE,
+    PROD_CORRELATION_CEILING,
+    PROD_CORRELATION_CHECK,
     REGION_AGNOSTIC_REGION,
     SIMULATION_SLOTS,
     SUPER_ALPHA_SLOTS,
@@ -874,12 +876,20 @@ async def top(
     # A region-agnostic parent is judged on its children, as BRAIN judges it.
     current |= await state.alphas.family_checks(stored)
     prod = await prod_correlations(state, list(stored), current)
+    passed = _prod_passed(current)
     # No download is started from here. Reading a page is not asking for one, and these are
     # three BRAIN requests per Alpha: enough of them earns a 429, which holds up every read of
     # an Alpha, captures included. Calculate After-Cost Sharpe is the way to ask, and it says
     # how many it will fetch before it does.
     return [
-        RankedAlpha.model_validate(_merged(r, _from_vault(r["alphaId"], stored, prod)))
+        RankedAlpha.model_validate(
+            _merged(
+                r,
+                _from_vault(r["alphaId"], stored, prod),
+                stored.get(r["alphaId"]) or {},
+                r["alphaId"] in passed,
+            )
+        )
         for r in ranked(best, current)
     ]
 
@@ -888,9 +898,67 @@ async def top(
 _FIGURES = ("sharpe", "fitness", "turnover", "returns", "drawdown", "margin")
 
 
-def _merged(row: dict[str, Any], vault: dict[str, Any]) -> dict[str, Any]:
-    """The row with the vault's additions; a core figure the row already has is kept."""
-    return row | {k: v for k, v in vault.items() if k not in _FIGURES or row.get(k) is None}
+#: Kepler's own refusal for an Alpha that traded in only one of the train and test periods.
+SHORT_HISTORY = "SHORT_HISTORY"
+
+
+def short_history(vault: dict[str, Any]) -> bool:
+    """Whether an Alpha traded in only one of its train and test periods: its figures for the
+    other are exactly zero. Its data starts or stops inside the backtest, so it falls far short
+    of the 500 days BRAIN asks for, which BRAIN reports only at the submission check
+    (LOW_DURATION, measured on such Alphas at 3 to 83 days), with weights concentrated in the
+    few names that have data. Without a test period there is no second period to read."""
+    if vault.get("test_start") is None:
+        return False
+    train_empty = vault.get("train_sharpe") == 0 and vault.get("train_fitness") in (0, None)
+    test_empty = vault.get("test_sharpe") == 0 and vault.get("test_fitness") in (0, None)
+    return bool(train_empty or test_empty)
+
+
+def _merged(
+    row: dict[str, Any],
+    vault: dict[str, Any],
+    stored: dict[str, Any],
+    prod_passed: bool = False,
+) -> dict[str, Any]:
+    """The row with the vault's additions; a core figure the row already has is kept.
+
+    Held back, with the reason, however clean the checks it has so far read: an Alpha with a
+    short history, and one whose Production Correlation BRAIN has measured at the ceiling or
+    above, unless BRAIN's own check has since passed it (a Sharpe 10% above each production
+    Alpha it repeats lets it in)."""
+    merged = row | {k: v for k, v in vault.items() if k not in _FIGURES or row.get(k) is None}
+    held: list[str] = []
+    if short_history(stored):
+        held.append(SHORT_HISTORY)
+    production = vault.get("prodCorrelation")
+    if (
+        isinstance(production, int | float)
+        and production >= PROD_CORRELATION_CEILING
+        and not prod_passed
+        and PROD_CORRELATION_CHECK not in row.get("refusedBy", [])
+    ):
+        held.append(PROD_CORRELATION_CHECK)
+    if held:
+        merged |= {
+            "submittable": False,
+            "pending": False,
+            "failedChecks": [*row.get("failedChecks", []), *held],
+            "refusedBy": [*row.get("refusedBy", []), *held],
+        }
+    return merged
+
+
+def _prod_passed(checks: dict[str, list[dict[str, Any]]]) -> set[str]:
+    """Alphas BRAIN's own Production Correlation check has passed, whatever the measured max."""
+    return {
+        alpha_id
+        for alpha_id, rows in checks.items()
+        if any(
+            c.get("name") == PROD_CORRELATION_CHECK and str(c.get("result")).upper() == "PASS"
+            for c in rows
+        )
+    }
 
 
 def _from_vault(
@@ -1083,6 +1151,7 @@ async def submittable_alphas(state: State) -> list[TaskAlpha]:
     # A region-agnostic parent is judged on its children, as BRAIN judges it.
     current |= await state.alphas.family_checks(stored)
     prod = await prod_correlations(state, list(stored), current)
+    passed = _prod_passed(current)
     by_trial = {t.id: t.study_id for t in trials}
     out: list[TaskAlpha] = []
     seen: set[str] = set()
@@ -1090,11 +1159,19 @@ async def submittable_alphas(state: State) -> list[TaskAlpha]:
         alpha_id = str(r["alphaId"])
         if not r["submittable"] or alpha_id in seen:
             continue
+        row = _merged(
+            r,
+            _from_vault(alpha_id, stored, prod),
+            stored.get(alpha_id) or {},
+            alpha_id in passed,
+        )
+        if not row["submittable"]:
+            continue
         seen.add(alpha_id)
         task = tasks[by_trial[r["trialId"]]]
         out.append(
             TaskAlpha.model_validate(
-                _merged(r, _from_vault(alpha_id, stored, prod))
+                row
                 | {
                     "taskId": task.id,
                     "taskName": task.label
