@@ -4557,6 +4557,8 @@ export interface components {
             date: string;
             /** Figures */
             figures?: string[][];
+            /** Levers */
+            levers?: string[];
             /** Places */
             places?: string[];
             /** Points */
@@ -4580,6 +4582,8 @@ export interface components {
             figures: string[][];
             /** Id */
             id: string;
+            /** Levers */
+            levers?: string[];
             /** Places */
             places: string[];
             /** Points */
@@ -5360,6 +5364,8 @@ export interface components {
         PlaybookView: {
             /** Insights */
             insights: components["schemas"]["InsightOut"][];
+            /** Levers */
+            levers: string[];
             /** Path */
             path: string;
             /** Places */
@@ -10299,6 +10305,7 @@ export interface operations {
                 q?: string;
                 topic?: string | null;
                 place?: string | null;
+                lever?: string | null;
                 limit?: number;
             };
             header?: never;

@@ -8,7 +8,7 @@ from typing import Annotated
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 
-from ..agents.playbook import Insight
+from ..agents.playbook import LEVERS, Insight
 from ..schemas import Out
 from .deps import State, refuse
 
@@ -25,6 +25,7 @@ class InsightIn(BaseModel):
     points: list[str] = Field(default_factory=list)
     figures: list[list[str]] = Field(default_factory=list)
     actions: list[str] = Field(default_factory=list)
+    levers: list[str] = Field(default_factory=list)
 
 
 class InsightOut(Out):
@@ -38,6 +39,7 @@ class InsightOut(Out):
     points: list[str]
     figures: list[list[str]]
     actions: list[str]
+    levers: list[str] = Field(default_factory=list)
     #: BM25 relevance to the question; absent when the list was not searched.
     score: float | None = None
 
@@ -46,6 +48,8 @@ class PlaybookView(Out):
     insights: list[InsightOut]
     topics: list[str]
     places: list[str]
+    #: Every lever an insight can name, in plan order.
+    levers: list[str]
     total: int
     #: Where the insights are kept, on this machine only.
     path: str
@@ -57,15 +61,17 @@ async def search(
     q: str = "",
     topic: str | None = None,
     place: str | None = None,
+    lever: str | None = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> PlaybookView:
     """Insights for a question (BM25), a topic or a screen; with none, the newest first."""
     book = state.playbook
-    found = book.search(q, topic=topic, place=place, limit=limit)
+    found = book.search(q, topic=topic, place=place, lever=lever, limit=limit)
     return PlaybookView(
         insights=[InsightOut.model_validate(asdict(i) | {"score": s}) for i, s in found],
         topics=book.topics(),
         places=book.places(),
+        levers=list(LEVERS),
         total=len(book.all()),
         path=str(book.path),
     )

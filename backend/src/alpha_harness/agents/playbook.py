@@ -27,6 +27,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 FILENAME = "playbook.json"
+#: What an insight can move, in the order a level plan reads them: the three Genius bars, then
+#: what decides among those who clear them, then the competitions and the craft under it all.
+LEVERS = ("signals", "pyramids", "performance", "tiebreakers", "competitions", "quality")
 #: BM25's usual constants: term-frequency saturation and length normalisation.
 K1, B = 1.4, 0.75
 #: The title says what an insight is about, so its words count this many times.
@@ -106,6 +109,8 @@ class Insight:
     figures: list[list[str]] = field(default_factory=list)
     #: What to do about it.
     actions: list[str] = field(default_factory=list)
+    #: Which Genius bars it moves: :data:`LEVERS`.
+    levers: list[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> Insight:
@@ -195,13 +200,16 @@ class Playbook:
         *,
         topic: str | None = None,
         place: str | None = None,
+        lever: str | None = None,
         limit: int = 50,
     ) -> list[tuple[Insight, float | None]]:
         """Insights for a question, a topic or a screen. With no question, the newest first."""
         pool = [
             i
             for i in self.all()
-            if (topic is None or topic in i.topics) and (place is None or place in i.places)
+            if (topic is None or topic in i.topics)
+            and (place is None or place in i.places)
+            and (lever is None or lever in i.levers)
         ]
         found: list[tuple[Insight, float | None]]
         if query.strip():

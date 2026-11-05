@@ -62,3 +62,11 @@ def test_insights_survive_a_reload_and_can_be_replaced_or_removed(tmp_path):
 def test_an_empty_playbook_gives_no_notes(tmp_path):
     assert playbook.notes(Playbook(tmp_path), "anything") == ""
     assert "Osmosis score" in playbook.notes(_book(tmp_path), "osmosis regions")
+
+
+def test_a_lever_gathers_the_insights_that_move_one_genius_bar(tmp_path):
+    book = _book(tmp_path)
+    book.upsert(Insight(id="pyr", title="Pyramids", summary="x", source="s", levers=["pyramids"]))
+    assert [i.id for i, _ in book.search(lever="pyramids")] == ["pyr"]
+    assert book.search(lever="signals") == []
+    assert playbook.LEVERS[:3] == ("signals", "pyramids", "performance")

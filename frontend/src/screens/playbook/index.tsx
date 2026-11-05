@@ -21,6 +21,7 @@ import {
 } from '@/ui/kit'
 import { PLAYBOOK_KEY, playbookApi } from './api'
 import { InsightBody } from './insight'
+import { RoadPanel } from './road'
 
 const EXAMPLES = [
   'full time role osmosis',
@@ -48,6 +49,7 @@ export function PlaybookScreen() {
         title="Playbook"
         description="What WorldQuant has told consultants in webinars, FAQs and competition rules, and what this account has measured. Ask in your own words; Kepler's chat and screens read the same insights."
       />
+      <RoadPanel />
       <Panel bodyClassName="flex flex-col gap-3">
         <label className="relative flex items-center">
           <SearchIcon className="pointer-events-none absolute left-2.5 size-4 text-ink-subtle" />
