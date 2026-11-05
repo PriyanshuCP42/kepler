@@ -1,7 +1,9 @@
 """The Strategist: value, yield and stalls decide the plan; history is counted per pyramid."""
 
+import asyncio
 import random
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 from alpha_harness.agents import strategist as st
 
@@ -103,3 +105,43 @@ async def test_the_plan_shown_is_the_plan_written():
     first = [n.category for n in await strategist.assessed()]
     second = [n.category for n in await strategist.assessed()]
     assert first == second
+
+
+class _Catalog:
+    def __init__(self, rows):
+        self.rows = rows
+
+    async def query(self, sql, params):
+        return self.rows
+
+
+def _market_state(rows, themes=()):
+    async def current():
+        return list(themes)
+
+    return SimpleNamespace(catalog=_Catalog(rows), themes=SimpleNamespace(current=current))
+
+
+_EUR_ROWS = [
+    {"dataset_id": f"d{i}", "universe": u, "alphas": 1, "coverage": 0.9, "fields": 5}
+    for i, u in enumerate(["TOP2500", "TOP2500", "TOP2500", "TOP800"])
+]
+
+
+def test_a_market_takes_the_universe_worldquant_measured_higher():
+    found = asyncio.run(
+        st.Strategist(_market_state(_EUR_ROWS), None).market(
+            {"region": "EUR", "delay": 1, "category": "pv"}, {}
+        )
+    )
+    assert found["universe"] == "TOP800"
+
+
+def test_a_theme_universe_still_wins_over_the_measured_one():
+    theme = SimpleNamespace(region="EUR", delay=1, universe="TOP2500")
+    found = asyncio.run(
+        st.Strategist(_market_state(_EUR_ROWS, [theme]), None).market(
+            {"region": "EUR", "delay": 1, "category": "pv"}, {}
+        )
+    )
+    assert found["universe"] == "TOP2500"

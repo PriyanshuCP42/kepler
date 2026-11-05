@@ -75,6 +75,47 @@ class Move:
     name: str
     fixes: frozenset[str]
     apply: Transform
+    #: Pseudo-counts (tries, wins) added to what Kepler has measured, from outside evidence.
+    prior: tuple[int, int] = (0, 0)
+
+
+#: WorldQuant's own measurements of smoothing operators, from the BRAIN webinar slide
+#: "Operators and Universes that can potentially improve performance" (November 2026): the
+#: average change each brought to turnover, margin, Fitness and IS Sharpe.
+#:
+#: ==========================  ========  ======  =======  =========
+#: operator                    turnover  margin  Fitness  IS Sharpe
+#: ==========================  ========  ======  =======  =========
+#: ts_target_tvr_decay         -17%      +43%    +12%     -5%
+#: jump_decay                  -13%      +27%    +10%     -3%
+#: group_backfill              -10%      +21%    +9%      -1%
+#: hump                        -14%      +25%    +10%     -1%
+#: ts_mean                     -15%      +27%    +4%      -4%
+#: ts_decay_linear             -9%       +19%    +5%      -2%
+#: ts_target_tvr_hump          -16%      +36%    +14%     -3%
+#: ts_target_tvr_delta_limit   -8%       +15%    +11%     +2%
+#: ==========================  ========  ======  =======  =========
+#:
+#: Heavy smoothing can cost a little IS Sharpe, so the strength (d, hump, target_tvr) is kept
+#: moderate. jump_decay and ts_target_tvr_delta_limit open at higher Genius levels and are
+#: left out until the account has them.
+SLIDE_FITNESS = {
+    "ts_target_tvr_decay": 0.12,
+    "group_backfill": 0.09,
+    "hump": 0.10,
+    "ts_mean": 0.04,
+    "ts_decay_linear": 0.05,
+    "ts_target_tvr_hump": 0.14,
+}
+#: Pseudo-tries a slide-backed fix starts with: enough to try it first, few enough that what
+#: Kepler measures on this account outweighs it within a couple of dozen repairs.
+SLIDE_TRIES = 6
+
+
+def slide_prior(operator: str) -> tuple[int, int]:
+    """Pseudo (tries, wins) for a fix, its win rate 0.5 plus 2.5x the slide's Fitness gain."""
+    rate = 0.5 + 2.5 * SLIDE_FITNESS[operator]
+    return SLIDE_TRIES, int(SLIDE_TRIES * min(rate, 0.9) + 0.5)
 
 
 def _wrap(tail: str) -> Transform:
@@ -179,12 +220,47 @@ MOVES: tuple[Move, ...] = (
         _TURNOVER | {"LOW_FITNESS"},
         setting_move(_decay(2)),
     ),
-    Move("smooth_mean", "Average over a week", _TURNOVER, _wrap("ts_mean(alpha, 5)")),
+    Move(
+        "smooth_mean",
+        "Average over a week",
+        _TURNOVER,
+        _wrap("ts_mean(alpha, 5)"),
+        slide_prior("ts_mean"),
+    ),
     Move(
         "smooth_linear",
         "Decay linearly over two weeks",
         _TURNOVER | {DECAY},
         _wrap("ts_decay_linear(alpha, 10)"),
+        slide_prior("ts_decay_linear"),
+    ),
+    Move(
+        "target_tvr_hump",
+        "Hold turnover near 20% by skipping small trades",
+        _TURNOVER | {"LOW_FITNESS"},
+        _wrap("ts_target_tvr_hump(alpha, lambda_min=0, lambda_max=1, target_tvr=0.2)"),
+        slide_prior("ts_target_tvr_hump"),
+    ),
+    Move(
+        "target_tvr_decay",
+        "Hold turnover near 20% by decaying",
+        _TURNOVER | {"LOW_FITNESS"},
+        _wrap("ts_target_tvr_decay(alpha, lambda_min=0, lambda_max=1, target_tvr=0.2)"),
+        slide_prior("ts_target_tvr_decay"),
+    ),
+    Move(
+        "hump",
+        "Skip trades under a one-percentile change",
+        _TURNOVER | {"LOW_FITNESS"},
+        _wrap("hump(rank(alpha), hump=0.01)"),
+        slide_prior("hump"),
+    ),
+    Move(
+        "group_backfill",
+        "Fill gaps from industry peers",
+        _TURNOVER | {"LOW_FITNESS"},
+        _wrap("group_backfill(alpha, industry, 21)"),
+        slide_prior("group_backfill"),
     ),
     Move(
         "faster_decay",
@@ -286,7 +362,7 @@ def choose(
     """Up to ``count`` fixes for these failures, each with the failure it was chosen for.
 
     Thompson sampling: each candidate draws from Beta(1 + wins, 1 + misses) for the failure it
-    fixes best, and the highest draws win.
+    fixes best, and the highest draws win. A fix's :attr:`Move.prior` is added to its counts.
     """
     rng = rng or random.Random()
     drawn: list[tuple[float, Move, str]] = []
@@ -296,6 +372,7 @@ def choose(
             if failure not in move.fixes:
                 continue
             tries, wins = stats.get((failure, move.id), (0, 0))
+            tries, wins = tries + move.prior[0], wins + move.prior[1]
             sample = rng.betavariate(1 + wins, 1 + tries - wins)
             if best is None or sample > best[0]:
                 best = (sample, failure)

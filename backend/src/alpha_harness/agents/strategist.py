@@ -52,6 +52,17 @@ PRIOR_SHAPE = 0.5
 PRIOR_RATE = 1.5
 #: The history is rebuilt at most this often; the grid refreshes on its own schedule.
 HISTORY_SECONDS = 1800
+#: Universes where WorldQuant measured a higher IS Sharpe, and by how much, from the BRAIN
+#: webinar slide "Operators and Universes that can potentially improve performance" (November
+#: 2026). Broader, high-coverage alphas (long + short count over 80% of the universe) diversify
+#: better and carry more capacity. A market's Power Pool theme universe still wins over these.
+SHARPE_UPLIFT: dict[str, tuple[str, float]] = {
+    "AMR": ("TOP600", 0.25),
+    "JPN": ("TOP1600", 0.22),
+    "KOR": ("TOP600", 0.19),
+    "EUR": ("TOP800", 0.06),
+    "TWN": ("TOP500", 0.03),
+}
 #: A niche in a market this month's Power Pool theme covers is boosted by this much per unit
 #: of the theme's multiplier: GLB at 1 by half again, ASI at 2 twice over.
 THEME_BOOST = 0.5
@@ -374,6 +385,9 @@ class Strategist:
             return None
         universes = Counter(str(r["universe"]) for r in rows)
         universe = max(universes, key=lambda u: (universes[u], _size(u)))
+        measured = SHARPE_UPLIFT.get(niche["region"])
+        if measured and measured[0] in universes:
+            universe = measured[0]
         for theme in await self._themes():
             if (
                 theme.region == niche["region"]

@@ -110,3 +110,30 @@ def test_near_misses_are_taken_in_turn_from_each_market():
         ("u2", "USA"),
     ]
     assert repair.interleave(rows) == ["e1", "u1", "g1", "e2", "u2", "e3"]
+
+
+def test_slide_backed_smoothers_wrap_the_original():
+    target = "(alpha, lambda_min=0, lambda_max=1, target_tvr=0.2)"
+    for move_id, call in (
+        ("target_tvr_hump", "ts_target_tvr_hump" + target),
+        ("target_tvr_decay", "ts_target_tvr_decay" + target),
+        ("hump", "hump(rank(alpha), hump=0.01)"),
+        ("group_backfill", "group_backfill(alpha, industry, 21)"),
+    ):
+        expression, settings = repair.BY_ID[move_id].apply("rank(close)", BASE, OPTIONS)
+        assert expression.endswith(call) and "alpha = rank(close)" in expression
+        assert settings == BASE
+
+
+def test_the_slide_tilts_a_fresh_account_towards_what_lifted_fitness_most():
+    rng = random.Random(0)
+    firsts = [repair.choose(["LOW_FITNESS"], {}, 1, rng)[0][0].id for _ in range(400)]
+    assert firsts.count("target_tvr_hump") > firsts.count("narrower_universe")
+    assert repair.slide_prior("ts_target_tvr_hump")[1] > repair.slide_prior("ts_mean")[1]
+
+
+def test_measured_results_outweigh_the_slide():
+    stats = {("LOW_FITNESS", "target_tvr_hump"): (30, 0), ("LOW_FITNESS", "hump"): (30, 20)}
+    rng = random.Random(0)
+    firsts = [repair.choose(["LOW_FITNESS"], stats, 1, rng)[0][0].id for _ in range(400)]
+    assert firsts.count("hump") > firsts.count("target_tvr_hump") * 5
