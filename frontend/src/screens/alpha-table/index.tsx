@@ -235,11 +235,27 @@ export function AlphaTable({
     [netRows, current, overrides, serverSort, angles],
   )
 
+  const netKeys = afterCost === 'local' ? new Set<string>(LOCAL_NET) : NET_OF_COST
   const columns: Column<AlphaTableRow>[] = [
     ...options
       .filter((o) => shown.has(o.key))
       .map((o) => ({
         ...o.column,
+        // In After-Cost Mode a recomputed column says so in its own header: the same label over
+        // a net figure read as BRAIN's own, next to columns (Turnover, Test Fitness) that stay
+        // gross.
+        ...(netBps !== undefined && netKeys.has(o.key)
+          ? {
+              header: (
+                <span className="inline-flex flex-col items-end leading-tight">
+                  {o.column.header}
+                  <span className="text-caption font-normal text-pnl-positive-text">
+                    net of {fmt.ratio(netBps, 1)} bps
+                  </span>
+                </span>
+              ),
+            }
+          : {}),
         sortable: serverSort ? Boolean(o.serverKey) : o.value !== undefined,
       })),
     {
@@ -250,7 +266,7 @@ export function AlphaTable({
           options={options}
           shown={shown}
           defaults={defaults}
-          netKeys={afterCost === 'local' ? new Set<string>(LOCAL_NET) : NET_OF_COST}
+          netKeys={netKeys}
         />
       ),
       width: '52px',
