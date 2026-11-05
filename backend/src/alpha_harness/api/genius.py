@@ -228,6 +228,9 @@ class OsmosisApply(BaseModel):
 
 #: Times a scope is planned and set again after BRAIN refuses points on some of its Alphas.
 OSMOSIS_ROUNDS = 3
+#: BRAIN's words for an Alpha that can never hold Osmosis points, measured: "Cannot update
+#: Osmosis points for non-compensated alpha."
+NON_COMPENSATED = "non-compensated"
 
 
 class OsmosisApplied(Out):
@@ -309,10 +312,11 @@ async def osmosis_plan(state: State) -> OsmosisView:
 @router.post("/osmosis/apply")
 async def osmosis_apply(body: OsmosisApply, state: State) -> OsmosisApplied:
     """Set these scopes' Osmosis points on BRAIN as proposed: each Alpha whose points differ
-    is edited, those left out set to 0. Only on your click; never submits anything.
+    is edited, those left out cleared. Only on your click; never submits anything.
 
-    BRAIN refuses points on some Alphas without saying why. Each refused one is remembered and
-    left out, and the scope is planned and set again without it, so its points still add up.
+    BRAIN holds points only on compensated Alphas. One it refuses as non-compensated is
+    remembered and left out, and the scope is planned and set again without it, so its points
+    still add up. Any other refusal is reported, not remembered.
     """
     if not state.auth.session.authenticated:
         raise refuse(409, "signed_out", "Sign in to BRAIN to set Osmosis points.")
@@ -333,16 +337,18 @@ async def osmosis_apply(body: OsmosisApply, state: State) -> OsmosisApplied:
                 if current.get(pick.alpha_id, 0) == pick.points:
                     continue
                 try:
+                    # BRAIN takes 1 or more, or null to clear: never 0.
                     await state.endpoints.update_alpha(
-                        pick.alpha_id, {"osmosisPoints": pick.points}
+                        pick.alpha_id, {"osmosisPoints": pick.points or None}
                     )
                     changed += 1
                 except BrainValidationError as exc:
-                    # BRAIN's 400: it will not take points on this Alpha, now or on a retry.
-                    log.warning(
-                        "osmosis.refused", alpha_id=pick.alpha_id, detail=exc.fields or exc.body
-                    )
-                    refused.append(pick.alpha_id)
+                    detail = exc.fields or exc.body
+                    log.warning("osmosis.refused", alpha_id=pick.alpha_id, detail=detail)
+                    if NON_COMPENSATED in str(detail).lower():
+                        refused.append(pick.alpha_id)
+                    else:
+                        failed.append(pick.alpha_id)
                 except Exception as exc:  # noqa: BLE001 - a blip: reported, not remembered
                     log.warning("osmosis.apply_failed", alpha_id=pick.alpha_id, error=str(exc))
                     failed.append(pick.alpha_id)

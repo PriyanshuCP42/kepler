@@ -336,8 +336,8 @@ SCHEMA_MAX_AGE = timedelta(hours=1)
 #: new markets simply do not appear, and the release looks broken. Measured on the release
 #: that added region-agnostic simulations.
 SCHEMA_KEY = f"settings_schema:{'+'.join(SIMULATION_TYPES)}"
-#: Alphas BRAIN refused Osmosis points on, left out of every proposal after.
-OSMOSIS_REFUSED_KEY = "osmosis_refused"
+#: Alphas BRAIN will not hold Osmosis points on (non-compensated), left out of every proposal.
+OSMOSIS_REFUSED_KEY = "osmosis_non_compensated"
 
 
 class PlatformMetadata:
@@ -413,8 +413,8 @@ class PlatformMetadata:
         return cached.get("items") if cached else None
 
     async def osmosis_refused(self) -> set[str]:
-        """Alphas BRAIN has refused Osmosis points on. It names no reason: measured, every
-        Alpha it refused was months older than every one it took."""
+        """Alphas BRAIN refuses Osmosis points on as "non-compensated": they can never hold
+        any, so a proposal that counts them never adds up."""
         cached = await self._read_cache(OSMOSIS_REFUSED_KEY)
         return set(cached.get("items") or []) if cached else set()
 

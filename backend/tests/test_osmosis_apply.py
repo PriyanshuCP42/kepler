@@ -14,10 +14,10 @@ from alpha_harness.api import genius
 from alpha_harness.brain.errors import BrainTransportError, BrainValidationError
 
 
-def _series(seed: int) -> dict:
+def _series(seed: int, drift: float = 0.15) -> dict:
     noise = np.random.default_rng(seed).normal(0, 1, 800)
     start = date(2021, 1, 4)
-    return {start + timedelta(days=i): (float(0.15 + noise[i]), 0.1) for i in range(800)}
+    return {start + timedelta(days=i): (float(drift + noise[i]), 0.1) for i in range(800)}
 
 
 class _Metadata:
@@ -39,28 +39,42 @@ class _Alphas:
         return [{"alpha_id": a, "region": "USA", "delay": 1} for a in self.ids]
 
     async def series(self, ids: list[str]) -> dict:
-        return {a: _series(int(a[1:])) for a in ids}
+        return {a: _series(int(a[1:]), -0.3 if a.startswith("w") else 0.15) for a in ids}
 
 
 class _Endpoints:
-    """BRAIN: holds points, but refuses them on the old Alphas."""
+    """BRAIN: holds 1 or more points, clears on null, refuses 0 and non-compensated Alphas."""
 
-    def __init__(self, old: set[str], flaky: set[str] | None = None) -> None:
+    def __init__(
+        self, old: set[str], flaky: set[str] | None = None, held: dict[str, int] | None = None
+    ) -> None:
         self.old = old
         self.flaky = flaky or set()
-        self.points: dict[str, int] = {}
+        self.points: dict[str, int] = dict(held or {})
 
     async def osmosis_points(self) -> dict[str, int]:
         return dict(self.points)
 
     async def update_alpha(self, alpha_id: str, properties: dict) -> dict:
+        value = properties["osmosisPoints"]
         if alpha_id in self.old:
             raise BrainValidationError(
-                f"PATCH /alphas/{alpha_id}: rejected by the platform", fields={}
+                f"PATCH /alphas/{alpha_id}: rejected by the platform",
+                fields={
+                    "osmosisPoints": ["Cannot update Osmosis points for non-compensated alpha."]
+                },
+            )
+        if value is not None and value < 1:
+            raise BrainValidationError(
+                f"PATCH /alphas/{alpha_id}: rejected by the platform",
+                fields={"osmosisPoints": ["Ensure this value is greater than or equal to 1."]},
             )
         if alpha_id in self.flaky:
             raise BrainTransportError(f"PATCH /alphas/{alpha_id}: connection reset")
-        self.points[alpha_id] = properties["osmosisPoints"]
+        if value is None:
+            self.points.pop(alpha_id, None)
+        else:
+            self.points[alpha_id] = value
         return {}
 
 
@@ -100,3 +114,17 @@ def test_a_network_blip_is_reported_but_not_remembered_as_refused():
 
     assert applied.failed == ["a2"]
     assert not metadata.refused
+
+
+def test_an_alpha_left_out_is_cleared_with_null_not_zero():
+    # "w0" loses money recently, so the proposal leaves it out; it holds points today.
+    brain = _Endpoints(old=set(), held={"w0": 2_000, "a0": 98_000})
+    metadata = _Metadata()
+    state = _state(brain, metadata)
+    state.alphas.ids.append("w0")
+
+    applied = asyncio.run(genius.osmosis_apply(genius.OsmosisApply(scopes=["USA/1"]), state))
+
+    assert not applied.failed and not metadata.refused
+    assert "w0" not in brain.points
+    assert sum(brain.points.values()) == osmosis.POINTS
