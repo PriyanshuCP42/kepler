@@ -2,6 +2,7 @@
 
 from types import SimpleNamespace
 
+from alpha_harness.agents import themes
 from alpha_harness.api import lab_tasks
 from alpha_harness.db.models import TrialState
 from alpha_harness.labs import quality
@@ -85,3 +86,36 @@ def test_a_measured_production_correlation_at_the_ceiling_holds_an_alpha_back():
     # BRAIN's own check passed it (its Sharpe beat each production Alpha it repeats by 10%).
     assert lab_tasks._merged(row, crowded, {}, prod_passed=True)["submittable"] is True
     assert lab_tasks._merged(row, {"prodCorrelation": 0.62}, {})["submittable"] is True
+
+
+def test_a_pure_power_pool_alpha_no_theme_covers_is_held_back():
+    nov = themes.parse({"id": "t1", "name": "GLB/D1 Power Pool Nov`26", "multiplier": 1.0})
+    assert nov is not None
+
+    def checks(sharpe, amer=1.2):
+        return [
+            {"name": "LOW_SHARPE", "result": "WARNING", "value": sharpe, "limit": 1.58},
+            {
+                "name": "LOW_GLB_AMER_SHARPE",
+                "result": "PASS" if amer > 1.0 else "WARNING",
+                "value": amer,
+                "limit": 1.0,
+            },
+            {"name": "POWER_POOL_CORRELATION", "result": "PASS", "value": 0.2},
+        ]
+
+    row = {"alphaId": "a1", "submittable": True, "pending": True}
+    row |= {"failedChecks": [], "refusedBy": []}
+    gbr = {"region": "GBR", "delay": 0, "universe": "TOP800"}
+    glb = {"region": "GLB", "delay": 1, "universe": "TOP3000"}
+    held = lab_tasks._merged(row, {}, gbr, themes=[nov], checks=checks(1.25))
+    assert held["submittable"] is False and held["refusedBy"] == [lab_tasks.OFF_THEME]
+    # Clear of the regular limits: a regular alpha, which needs no theme.
+    assert lab_tasks._merged(row, {}, gbr, themes=[nov], checks=checks(1.9))["submittable"]
+    # In the theme's market and clear of what it asks beyond it.
+    assert lab_tasks._merged(row, {}, glb, themes=[nov], checks=checks(1.25))["submittable"]
+    # In the market but under the Americas Sharpe the November theme asks for.
+    missed = lab_tasks._merged(row, {}, glb, themes=[nov], checks=checks(1.25, amer=0.8))
+    assert missed["refusedBy"] == [lab_tasks.OFF_THEME]
+    # Themes unknown: nothing is held back for want of them.
+    assert lab_tasks._merged(row, {}, gbr, themes=[], checks=checks(1.25))["submittable"]

@@ -184,6 +184,20 @@ def takeable(row: dict[str, Any], themes: list[Theme]) -> bool:
     )
 
 
+def off_theme(row: dict[str, Any], themes: list[Theme]) -> bool:
+    """Whether BRAIN would refuse this alpha as a pure Power Pool alpha no theme covers: it
+    misses a regular limit, is judged as Power Pool, and none of the month's themes covers its
+    market or the extra checks the theme asks for. ``False`` while the themes are unknown."""
+    checks = (
+        checks_of(row.get("checks")) if not isinstance(row.get("checks"), list) else row["checks"]
+    )
+    if not themes or not needs_power_pool(checks) or not is_power_pool(checks):
+        return False
+    return not any(
+        t.covers(row.get("region"), row.get("delay"), row.get("universe"), checks) for t in themes
+    )
+
+
 class Themes:
     """The month's themes, read from the newest alphas' checks and kept for :data:`TTL`."""
 

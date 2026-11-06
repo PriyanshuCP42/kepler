@@ -11,7 +11,7 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { PlayIcon, RefreshCwIcon, SquareIcon } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { tasks } from '@/api/core'
 import { errorMessage } from '@/api/http'
@@ -126,6 +126,7 @@ const Step = ({ name, count }: { name: string; count: number | null }) => (
 
 export function AlphaPane({
   title,
+  description,
   view,
   rows,
   offer,
@@ -140,6 +141,8 @@ export function AlphaPane({
   initial = 'pool',
 }: {
   title: string
+  /** A line under the title, such as how many of the rows BRAIN has fully checked. */
+  description?: ReactNode
   /** Where the table's choice of columns is kept. */
   view: string
   rows: RankedAlpha[]
@@ -253,6 +256,7 @@ export function AlphaPane({
   return (
     <Panel
       title={title}
+      description={description}
       actions={
         <div className="flex flex-wrap items-center gap-3">
           <Button

@@ -19,6 +19,7 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select, update
 
+from ..agents.themes import Theme, off_theme
 from ..brain.errors import BrainError, BrainPollTimeout, BrainRateLimited
 from ..brain.platform import (
     POWER_POOL_CORRELATION_CEILING,
@@ -877,6 +878,7 @@ async def top(
     current |= await state.alphas.family_checks(stored)
     prod = await prod_correlations(state, list(stored), current)
     passed = _prod_passed(current)
+    month_themes = await state.themes.current()
     # No download is started from here. Reading a page is not asking for one, and these are
     # three BRAIN requests per Alpha: enough of them earns a 429, which holds up every read of
     # an Alpha, captures included. Calculate After-Cost Sharpe is the way to ask, and it says
@@ -888,6 +890,8 @@ async def top(
                 _from_vault(r["alphaId"], stored, prod),
                 stored.get(r["alphaId"]) or {},
                 r["alphaId"] in passed,
+                month_themes,
+                current.get(r["alphaId"]),
             )
         )
         for r in ranked(best, current)
@@ -900,6 +904,9 @@ _FIGURES = ("sharpe", "fitness", "turnover", "returns", "drawdown", "margin")
 
 #: Kepler's own refusal for an Alpha that traded in only one of the train and test periods.
 SHORT_HISTORY = "SHORT_HISTORY"
+#: Kepler's own refusal for a pure Power Pool Alpha no Power Pool theme covers this month:
+#: BRAIN refuses it with "Pure Power Pool submission does not match any Power Pool Theme".
+OFF_THEME = "OFF_THEME"
 
 
 def short_history(vault: dict[str, Any]) -> bool:
@@ -920,17 +927,23 @@ def _merged(
     vault: dict[str, Any],
     stored: dict[str, Any],
     prod_passed: bool = False,
+    themes: list[Theme] | None = None,
+    checks: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """The row with the vault's additions; a core figure the row already has is kept.
 
     Held back, with the reason, however clean the checks it has so far read: an Alpha with a
-    short history, and one whose Production Correlation BRAIN has measured at the ceiling or
-    above, unless BRAIN's own check has since passed it (a Sharpe 10% above each production
-    Alpha it repeats lets it in)."""
+    short history; a pure Power Pool Alpha no theme covers this month (its simulation leaves
+    the regular limits it misses as warnings, which BRAIN's submission check then refuses);
+    and one whose Production Correlation BRAIN has measured at the ceiling or above, unless
+    BRAIN's own check has since passed it (a Sharpe 10% above each production Alpha it
+    repeats lets it in)."""
     merged = row | {k: v for k, v in vault.items() if k not in _FIGURES or row.get(k) is None}
     held: list[str] = []
     if short_history(stored):
         held.append(SHORT_HISTORY)
+    if themes and off_theme(stored | {"checks": checks or stored.get("checks")}, themes):
+        held.append(OFF_THEME)
     production = vault.get("prodCorrelation")
     if (
         isinstance(production, int | float)
@@ -1152,6 +1165,7 @@ async def submittable_alphas(state: State) -> list[TaskAlpha]:
     current |= await state.alphas.family_checks(stored)
     prod = await prod_correlations(state, list(stored), current)
     passed = _prod_passed(current)
+    month_themes = await state.themes.current()
     by_trial = {t.id: t.study_id for t in trials}
     out: list[TaskAlpha] = []
     seen: set[str] = set()
@@ -1164,6 +1178,8 @@ async def submittable_alphas(state: State) -> list[TaskAlpha]:
             _from_vault(alpha_id, stored, prod),
             stored.get(alpha_id) or {},
             alpha_id in passed,
+            month_themes,
+            current.get(alpha_id),
         )
         if not row["submittable"]:
             continue

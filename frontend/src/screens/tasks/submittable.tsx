@@ -49,11 +49,20 @@ export function SubmittableAlphas({
   useRefetchOn('studies', ['submittable-alphas'], 30_000)
   const [sort, setSort] = useState<Sort>({ key: 'sharpe', desc: true })
   const rows = useMemo<RankedAlpha[]>(() => query.data ?? [], [query.data])
+  // Most rows are judged on the checks of their simulation alone. BRAIN's submission check
+  // settles the rest (correlations, weight concentration and the like), and only the rows it
+  // has settled are ready to submit; the others are a shortlist to check.
+  const checked = rows.filter((r) => !r.pending).length
 
   return (
     <div className="flex flex-col gap-4">
       <AlphaPane
         title="Submittable Alphas"
+        description={
+          query.data
+            ? `${fmt.int(checked)} passed BRAIN's full submission check; ${fmt.int(rows.length - checked)} passed their simulation's checks and still need it. Pure Power Pool Alphas no theme covers this month are left out.`
+            : undefined
+        }
         view="submittable"
         rows={rows}
         offer={OFFER}
