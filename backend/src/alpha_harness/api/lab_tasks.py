@@ -57,6 +57,7 @@ from ..schemas import Out
 from ..tasks import Task
 from ..tools import power_pool
 from ..vault.yields import checks_of, clean, is_submitted, verdict
+from .alphas import correlation_job
 from .deps import State, refuse
 
 log = structlog.get_logger(__name__)
@@ -628,7 +629,9 @@ async def start_prod_correlation(state: State, alpha_ids: list[str]) -> str:
             done += 1
             while True:
                 try:
-                    answer = await state.endpoints.correlations(alpha_id, "prod")
+                    # Shared with the Alpha page: a poll it started is joined, not repeated,
+                    # and the answer is kept under the same key either way.
+                    await correlation_job(state, alpha_id, "prod")
                 except BrainRateLimited as exc:
                     if not exc.retryable:
                         raise
@@ -653,10 +656,6 @@ async def start_prod_correlation(state: State, alpha_ids: list[str]) -> str:
                     log.warning("prod_correlation.failed", alpha_id=alpha_id, error=exc.message)
                     failed += 1
                     break
-                async with state.db.session() as session:
-                    await session.merge(
-                        BrainCache(key=_prod_key(alpha_id), body=answer, fetched_at=utcnow())
-                    )
                 break
         detail = f"Production Correlation for {len(wanted) - failed} Alphas"
         return detail + (f". BRAIN could not check {failed}" if failed else "")

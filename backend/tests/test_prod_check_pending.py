@@ -10,6 +10,7 @@ from sqlalchemy import select
 
 from alpha_harness.api.lab_tasks import AlphaIds, check_prod_correlation
 from alpha_harness.brain.errors import BrainPollTimeout
+from alpha_harness.brain.jobs import BrainJobs
 from alpha_harness.db.models import BrainCache
 from alpha_harness.db.sqlite import Database
 from alpha_harness.vault.store import _by_alpha
@@ -35,7 +36,7 @@ class _Endpoints:
         self.slow = slow
         self.asked: list[str] = []
 
-    async def correlations(self, alpha_id: str, kind: str) -> dict[str, Any]:
+    async def correlations(self, alpha_id: str, kind: str, ceiling: float = 0) -> dict[str, Any]:
         self.asked.append(alpha_id)
         if self.slow.get(alpha_id, 0) > 0:
             self.slow[alpha_id] -= 1
@@ -66,6 +67,7 @@ def _state(db: Database, slow: dict[str, int]) -> Any:
     state = type("S", (), {})()
     state.db, state.endpoints, state.alphas = db, _Endpoints(slow), _Alphas()
     state.tasks, state.backfill = _Tasks(), _Backfill()
+    state.jobs = BrainJobs()
     return state
 
 

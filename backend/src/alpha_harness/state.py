@@ -34,6 +34,7 @@ from .agents.themes import Themes
 from .brain.client import BrainClient
 from .brain.endpoints import BrainEndpoints
 from .brain.errors import BrainError, BrainTransportError
+from .brain.jobs import BrainJobs
 from .brain.platform import API_BASE
 from .catalog import search
 from .catalog.queries import CatalogQueries
@@ -91,6 +92,8 @@ class AppState:
 
         self.client = BrainClient(API_BASE)
         self.endpoints = BrainEndpoints(self.client)
+        #: Slow BRAIN answers (correlations, submission checks), polled once and kept.
+        self.jobs = BrainJobs()
         self.metadata = PlatformMetadata(self.db, self.endpoints)
         self.quota_gate = QuotaGate(
             self.db,

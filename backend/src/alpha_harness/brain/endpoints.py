@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 from .altcha import Challenge
+from .client import POLL_TIMEOUT
 from .errors import BrainError, BrainServiceUnavailable, BrainVerificationRequired
 from .platform import ALL_FIELDS_CEILING, ALL_FIELDS_PAGE
 from .schemas import (
@@ -253,17 +254,19 @@ class BrainEndpoints:
         r = await self.client.poll(f"/alphas/{alpha_id}/recordsets/{name}")
         return RecordSet.model_validate(r.body or {})
 
-    async def check_alpha(self, alpha_id: str) -> dict[str, Any]:
+    async def check_alpha(self, alpha_id: str, ceiling: float = POLL_TIMEOUT) -> dict[str, Any]:
         """Re-run submission checks without submitting. Asynchronous."""
-        r = await self.client.poll(f"/alphas/{alpha_id}/check")
+        r = await self.client.poll(f"/alphas/{alpha_id}/check", ceiling)
         return r.body if isinstance(r.body, dict) else {}
 
-    async def correlations(self, alpha_id: str, kind: str = "self") -> dict[str, Any]:
+    async def correlations(
+        self, alpha_id: str, kind: str = "self", ceiling: float = POLL_TIMEOUT
+    ) -> dict[str, Any]:
         """``self`` or ``prod`` correlation. Asynchronous.
 
         ``power-pool`` is undocumented but works.
         """
-        r = await self.client.poll(f"/alphas/{alpha_id}/correlations/{kind}")
+        r = await self.client.poll(f"/alphas/{alpha_id}/correlations/{kind}", ceiling)
         return r.body if isinstance(r.body, dict) else {}
 
     async def alpha_body(self, alpha_id: str) -> dict[str, Any]:

@@ -256,7 +256,8 @@ export interface paths {
          * @description Re-run the submission checks without submitting.
          *
          *     Changes nothing on the platform. It does update the local copy, so an alpha that has
-         *     just resolved appears on the submit screen without waiting for the next backfill.
+         *     just resolved appears on the submit screen without waiting for the next backfill. A
+         *     check BRAIN is slow to finish is polled on in the background and kept when it comes.
          */
         get: operations["check_alpha_api_alphas__alpha_id__check_get"];
         put?: never;
@@ -280,7 +281,8 @@ export interface paths {
          *
          *     A slow, rate-limited job, so the answer is kept and returned with ``fetchedAt``; only
          *     ``refresh`` asks BRAIN again. ``cachedOnly`` answers ``{"cached": false}`` when nothing
-         *     is kept, so a page can show old answers without asking.
+         *     is kept, so a page can show old answers without asking. One BRAIN is slow on is polled on
+         *     in the background, and asking for it again joins that poll rather than starting another.
          */
         get: operations["correlations_api_alphas__alpha_id__correlations__kind__get"];
         put?: never;

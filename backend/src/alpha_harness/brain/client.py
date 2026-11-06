@@ -60,6 +60,12 @@ POLL_TIMEOUT = 300.0
 
 #: Shortest wait between polls of a pending job, whatever ``Retry-After`` says.
 MIN_POLL_DELAY = 0.25
+#: Each poll of a job still pending waits this much longer than the one before, up to
+#: :data:`MAX_POLL_DELAY`. BRAIN asks for a poll a second even on a correlation that takes
+#: ten minutes, and correlations share a tight hourly window: a few alphas polled that fast
+#: for that long spend it, and every other correlation then waits on the 429.
+POLL_STEP = 0.5
+MAX_POLL_DELAY = 10.0
 
 #: A reset this large is a wall-clock instant, not a countdown.
 EPOCH_SECONDS = 1e9
@@ -476,13 +482,15 @@ class BrainClient:
 
     # -- the asynchronous job protocol -----------------------------------
 
-    async def poll(self, path: str) -> BrainResponse:
+    async def poll(self, path: str, ceiling: float = POLL_TIMEOUT) -> BrainResponse:
         """Drive an asynchronous ``GET`` job to completion.
 
         Re-issues the request while the response carries ``Retry-After``, waiting what the
-        server asks. Returns the first response *without* that header.
+        server asks or, on a job that stays pending, a little longer each time (see
+        :data:`POLL_STEP`), for at most ``ceiling`` seconds. Returns the first response
+        *without* that header.
         """
-        deadline = time.monotonic() + POLL_TIMEOUT
+        deadline = time.monotonic() + ceiling
         attempt = 0
 
         while True:
@@ -502,7 +510,8 @@ class BrainClient:
 
             # The documented "poll now" (zero, past or unreadable) still waits a floor:
             # otherwise a job that stays pending re-requests as fast as the round trip.
-            delay = min(max(response.retry_after or 0.0, MIN_POLL_DELAY), remaining)
+            floor = max(MIN_POLL_DELAY, min(POLL_STEP * (attempt - 1), MAX_POLL_DELAY))
+            delay = min(max(response.retry_after or 0.0, floor), remaining)
             log.debug("brain.poll.waiting", path=path, attempt=attempt, delay=delay)
             await asyncio.sleep(delay)
 

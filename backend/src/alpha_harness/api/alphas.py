@@ -405,9 +405,18 @@ async def check_alpha(alpha_id: str, state: State) -> BrainPayload:
     """Re-run the submission checks without submitting.
 
     Changes nothing on the platform. It does update the local copy, so an alpha that has
-    just resolved appears on the submit screen without waiting for the next backfill.
+    just resolved appears on the submit screen without waiting for the next backfill. A
+    check BRAIN is slow to finish is polled on in the background and kept when it comes.
     """
-    body = await state.endpoints.check_alpha(alpha_id)
+    body = await state.jobs.run(
+        f"check:{alpha_id}",
+        lambda ceiling: state.endpoints.check_alpha(alpha_id, ceiling),
+        lambda answer: _keep_check(state, alpha_id, answer),
+    )
+    return BrainPayload(body)
+
+
+async def _keep_check(state: State, alpha_id: str, body: dict[str, Any]) -> None:
     checks = ((body.get("is") or {}).get("checks")) or []
     if checks:
         await state.alphas.save_checks(alpha_id, checks)
@@ -421,7 +430,6 @@ async def check_alpha(alpha_id: str, state: State) -> BrainPayload:
             await _store(state, f"check:{child_id}", {"is": {"checks": child_checks}})
             await _forget(state, f"alpha:{child_id}")
     await _forget(state, f"alpha:{alpha_id}")
-    return BrainPayload(body)
 
 
 @router.get("/{alpha_id}/correlations/{kind}")
@@ -436,14 +444,29 @@ async def correlations(
 
     A slow, rate-limited job, so the answer is kept and returned with ``fetchedAt``; only
     ``refresh`` asks BRAIN again. ``cachedOnly`` answers ``{"cached": false}`` when nothing
-    is kept, so a page can show old answers without asking.
+    is kept, so a page can show old answers without asking. One BRAIN is slow on is polled on
+    in the background, and asking for it again joins that poll rather than starting another.
     """
+    key = f"correlation:{kind}:{alpha_id}"
     return await _kept(
         state,
-        f"correlation:{kind}:{alpha_id}",
-        lambda: state.endpoints.correlations(alpha_id, kind),
+        key,
+        lambda: correlation_job(state, alpha_id, kind),
         refresh=refresh,
         cached_only=cached_only,
+    )
+
+
+async def correlation_job(state: State, alpha_id: str, kind: str) -> dict[str, Any]:
+    """BRAIN's correlation of ``kind`` for this Alpha, through the shared background poll,
+    kept under the key the Alpha page and the Production Correlation workflow read."""
+    key = f"correlation:{kind}:{alpha_id}"
+
+    async def keep(body: dict[str, Any]) -> None:
+        await _store(state, key, body)
+
+    return await state.jobs.run(
+        key, lambda ceiling: state.endpoints.correlations(alpha_id, kind, ceiling), keep
     )
 
 
