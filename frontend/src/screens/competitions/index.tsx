@@ -11,6 +11,7 @@ import { type Competition, competitions } from '@/api/core'
 import type { components } from '@/api/generated'
 import { PLATFORM_COMPETITIONS_URL } from '@/api/platform'
 import { fmt } from '@/lib/format'
+import { ChallengeTabBody } from '@/screens/competitions/challenge'
 import { PlaybookPanel } from '@/screens/playbook/insight'
 import {
   Badge,
@@ -235,6 +236,12 @@ function PastTab({ past }: { past: Competition[] }) {
 
 export function CompetitionsScreen() {
   const list = useQuery({ queryKey: ['competitions'], queryFn: competitions.list })
+  const challengeList = useQuery({
+    queryKey: ['competitions', 'challenges'],
+    queryFn: competitions.challenges,
+    refetchInterval: 60_000,
+  })
+  const challenges = challengeList.data?.challenges.filter((c) => !c.ended) ?? []
   const params = useParams({ strict: false }) as { tab?: string }
   const all = list.data?.competitions ?? []
   const live = all.filter((c) => c.ongoing)
@@ -242,6 +249,7 @@ export function CompetitionsScreen() {
   const themes = list.data?.themes ?? []
 
   const tabs = [
+    ...challenges.map((c) => ({ key: c.id, label: c.name })),
     ...live.map((c) => ({ key: c.id.toLowerCase(), label: c.name })),
     ...themes.map((t) => ({ key: themeKey(t), label: t.name })),
     ...(past.length ? [{ key: 'past', label: `Past (${past.length})` }] : []),
@@ -249,6 +257,7 @@ export function CompetitionsScreen() {
   const tab = params.tab ?? tabs[0]?.key
   const competition = live.find((c) => c.id.toLowerCase() === tab)
   const theme = themes.find((t) => themeKey(t) === tab)
+  const challenge = challenges.find((c) => c.id === tab)
 
   return (
     <Page>
@@ -257,7 +266,7 @@ export function CompetitionsScreen() {
         description="Each competition BRAIN is running and each Power Pool theme, with where you stand and what WorldQuant has said about it. Joining and submitting happen on BRAIN."
       />
       {list.isError && <ErrorNotice error={list.error} title="Could not read competitions" />}
-      {list.isPending ? (
+      {list.isPending && challengeList.isPending ? (
         <Skeleton label="Reading competitions from BRAIN" />
       ) : tabs.length === 0 ? (
         <Panel>
@@ -277,7 +286,9 @@ export function CompetitionsScreen() {
               </TabLink>
             ))}
           </TabBar>
-          {competition ? (
+          {challenge ? (
+            <ChallengeTabBody challenge={challenge} />
+          ) : competition ? (
             <CompetitionTab competition={competition} />
           ) : theme ? (
             <ThemeTabBody theme={theme} />

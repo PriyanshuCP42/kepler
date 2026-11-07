@@ -40,7 +40,11 @@ export type Competition = Schemas['Competition']
 export const competitions = {
   /** Ongoing first, soonest to end. One BRAIN read, plus one per ongoing competition. */
   list: () => http.get<Schemas['Competitions']>('/api/competitions'),
+  /** Consultant challenges, from Kepler's own records: answers while signed out. */
+  challenges: () => http.get<Schemas['Challenges']>('/api/competitions/challenges'),
 }
+
+export type ChallengeTab = Schemas['ChallengeTab']
 
 export const today = {
   /** The first screen in one call. Scope defaults to USA / D1 / TOP3000. */

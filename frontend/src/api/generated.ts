@@ -962,6 +962,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/competitions/challenges": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Challenges
+         * @description Each consultant challenge Kepler knows the rules of, with where you stand in it.
+         *
+         *     Read from Kepler's own records only, so it answers while the session is signed out.
+         */
+        get: operations["challenges_api_competitions_challenges_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/desk": {
         parameters: {
             query?: never;
@@ -3598,6 +3620,119 @@ export interface components {
             n: number;
             /** Name */
             name: string | null;
+        };
+        /** ChallengeDay */
+        ChallengeDay: {
+            /** Day */
+            day: string;
+            /** Eligible */
+            eligible: number;
+            /** Met */
+            met: boolean | null;
+            /** Simulations */
+            simulations: number;
+            /** Submissions */
+            submissions: number;
+        };
+        /**
+         * ChallengeEntry
+         * @description One Alpha submitted inside a challenge's window, and whether it counts.
+         */
+        ChallengeEntry: {
+            /** Alphaid */
+            alphaId: string;
+            /** Day */
+            day: string | null;
+            /** Eligible */
+            eligible: boolean;
+            /** Prodcorrelation */
+            prodCorrelation: number | null;
+            /** Reasons */
+            reasons: string[];
+            /** Region */
+            region: string | null;
+            /** Sharpe */
+            sharpe: number | null;
+            /** Themematch */
+            themeMatch: boolean | null;
+        };
+        /** ChallengeRules */
+        ChallengeRules: {
+            /** Maxprod */
+            maxProd: number;
+            /** Minalphas */
+            minAlphas: number;
+            /** Mindailysimulations */
+            minDailySimulations: number;
+            /** Mindailysubmissions */
+            minDailySubmissions: number;
+            /** Minthemealphas */
+            minThemeAlphas: number;
+            /** Prizes */
+            prizes: string[];
+            /** Ranking */
+            ranking: string;
+            /** Regions */
+            regions: string[];
+            /** Themedelay */
+            themeDelay: number | null;
+            /** Themeregion */
+            themeRegion: string | null;
+            /** Tiebreaker */
+            tieBreaker: string;
+        };
+        /** ChallengeTab */
+        ChallengeTab: {
+            /** Alphasneeded */
+            alphasNeeded: number;
+            /** Alphasperday */
+            alphasPerDay: number;
+            /** Averageprod */
+            averageProd: number | null;
+            /** Days */
+            days: components["schemas"]["ChallengeDay"][];
+            /** Daysleft */
+            daysLeft: number;
+            /** Eligible */
+            eligible: number;
+            /** Enddate */
+            endDate: string;
+            /** Ended */
+            ended: boolean;
+            /** Entries */
+            entries: components["schemas"]["ChallengeEntry"][];
+            /** Id */
+            id: string;
+            /** Misseddays */
+            missedDays: string[];
+            /** Name */
+            name: string;
+            rules: components["schemas"]["ChallengeRules"];
+            /** Signedin */
+            signedIn: boolean | null;
+            /** Simulationsneededtoday */
+            simulationsNeededToday: number;
+            /** Simulationstoday */
+            simulationsToday: number;
+            /** Startdate */
+            startDate: string;
+            /** Started */
+            started: boolean;
+            /** Submissionsneededtoday */
+            submissionsNeededToday: number;
+            /** Themealphas */
+            themeAlphas: number;
+            /** Today */
+            today: string;
+            /** Unmeasured */
+            unmeasured: number;
+            /** Warnings */
+            warnings: string[];
+        };
+        /** Challenges */
+        Challenges: {
+            /** Challenges */
+            challenges: components["schemas"]["ChallengeTab"][];
         };
         /** ChatMessageOut */
         ChatMessageOut: {
@@ -8864,6 +8999,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Competitions"];
+                };
+            };
+        };
+    };
+    challenges_api_competitions_challenges_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Challenges"];
                 };
             };
         };

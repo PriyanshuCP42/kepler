@@ -445,6 +445,11 @@ class BatchEngine:
             rows = await session.scalars(select(TaskQuota))
             return {r.name: (r.max_slots if r.enabled else 0) for r in rows}
 
+    @property
+    def session_lost(self) -> bool:
+        """BRAIN refused the session: nothing is sent until it is usable again."""
+        return self._session_lost
+
     async def status(self) -> dict[str, Any]:
         """Everything the matrix header needs in one call."""
         async with self.db.session() as session:
