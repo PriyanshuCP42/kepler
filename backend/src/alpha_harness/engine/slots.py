@@ -65,8 +65,9 @@ log = structlog.get_logger(__name__)
 #: Added to a batched simulation's outcome when BRAIN named no child, so it was matched by order.
 POSITIONAL_NOTE = "Matched to this request by submission order."
 
-#: A batch BRAIN ends ERROR with every child FAIL, no alpha and no reason, is BRAIN's own
-#: hiccup: the same expressions simulate alone. Its simulations are queued again this often.
+#: A batch BRAIN ends ERROR leaves children with no alpha and no reason: every one FAIL
+#: (BRAIN's own hiccup; the same expressions simulate alone), or CANCELLED beside a sibling
+#: it refused by name. Those blank children are queued again this often; the refused one never.
 BLANK_BATCH_RETRIES = 1
 
 #: BRAIN has answered "daily limit reached" with thousands of simulations left and taken the
@@ -1002,7 +1003,7 @@ class BatchEngine:
         attributed = {
             r.platform_id for r in records if r.platform_id and SimStatus(r.status).terminal
         }
-        open_rows = [r for r in records if not SimStatus(r.status).terminal]
+        open_rows = _in_send_order(parent, [r for r in records if not SimStatus(r.status).terminal])
         if await self._read_children([c for c in child_ids if c not in attributed]):
             return  # The session is gone; every read would fail the same way.
 
@@ -1026,26 +1027,10 @@ class BatchEngine:
                 await self.tracker.notify()
             return
 
-        if str(parent.platform_status or "").upper() == "ERROR" and all(
-            outcomes[c].alpha_id is None and not outcomes[c].message for c in child_ids
-        ):
-            retry = [r.id for r in open_rows if r.orphan_requeues < BLANK_BATCH_RETRIES]
-            async with self.db.session() as session:
-                requeued = await transition(
-                    session,
-                    retry,
-                    from_=[SimStatus.RUNNING],
-                    status=SimStatus.QUEUED,
-                    parent_record_id=None,
-                    platform_id=None,
-                    sent_at=None,
-                    finished_at=None,
-                    progress=None,
-                    orphan_requeues=SimulationRecord.orphan_requeues + 1,
-                    message="BRAIN failed its whole batch without a reason; queued again.",
-                )
-            open_rows = [r for r in open_rows if r.id not in requeued]
-            log.info("engine.blank_batch_requeued", parent=parent.id, requeued=len(requeued))
+        if str(parent.platform_status or "").upper() == "ERROR":
+            open_rows = await self._requeue_blank(
+                parent.id, child_ids, open_rows, resolved, outcomes
+            )
 
         await self._finish_children(open_rows, resolved, outcomes)
         async with self.db.session() as session:
@@ -1068,6 +1053,60 @@ class BatchEngine:
             matched=len(resolved),
         )
         await self.tracker.notify()
+
+    async def _requeue_blank(
+        self,
+        parent_id: int,
+        child_ids: list[str],
+        open_rows: list[SimulationRecord],
+        resolved: dict[int, dict[str, Any]],
+        outcomes: dict[str, Outcome],
+    ) -> list[SimulationRecord]:
+        """Queue again the rows of an ERROR batch that BRAIN gave no result, and return the rest.
+
+        Two shapes reach here. Every child FAIL with no alpha and no reason is BRAIN's own
+        hiccup. One child refused by name (an unknown field, a redefined variable) makes BRAIN
+        end the others CANCELLED, also with nothing: they never ran, and most are valid. Only
+        a row matched to a blank child goes again; the refused one is finished with its error,
+        so it is never sent twice. BRAIN charges none of these children (its own count follows
+        the simulations that finished), and the row keeps its trial, so the lab is charged
+        nothing for the retry. ``orphan_requeues`` caps it at :data:`BLANK_BATCH_RETRIES`: a
+        sibling packed with another bad child next time is finished, not queued for ever.
+        """
+        blank = {c for c, o in outcomes.items() if o.alpha_id is None and not o.message}
+        if not blank:
+            return open_rows
+        whole = blank.issuperset(child_ids)
+        retry = [
+            r.id
+            for r in open_rows
+            if r.orphan_requeues < BLANK_BATCH_RETRIES
+            and (whole or resolved.get(r.id, {}).get("platform_id") in blank)
+        ]
+        if not retry:
+            return open_rows
+        async with self.db.session() as session:
+            requeued = await transition(
+                session,
+                retry,
+                from_=[SimStatus.RUNNING],
+                status=SimStatus.QUEUED,
+                parent_record_id=None,
+                platform_id=None,
+                sent_at=None,
+                finished_at=None,
+                progress=None,
+                orphan_requeues=SimulationRecord.orphan_requeues + 1,
+                message=(
+                    "BRAIN failed its whole batch without a reason; queued again."
+                    if whole
+                    else "BRAIN cancelled this with a simulation it refused; queued again."
+                ),
+            )
+        log.info(
+            "engine.blank_batch_requeued", parent=parent_id, requeued=len(requeued), whole=whole
+        )
+        return [r for r in open_rows if r.id not in requeued]
 
     async def _read_children(self, child_ids: list[str]) -> bool:
         """Read each unfinished child that is due. Returns True if the session was refused.
@@ -1197,6 +1236,29 @@ def _check_expression(payload: dict[str, Any]) -> None:
     expression = payload.get("regular")
     if isinstance(expression, str):
         parse(expression)
+
+
+def _in_send_order(
+    parent: SimulationRecord, rows: list[SimulationRecord]
+) -> list[SimulationRecord]:
+    """``rows`` in the order their batch sent them, which is the order BRAIN lists children.
+
+    Failed and cancelled children come back with no expression, so they are matched by
+    position alone, and BRAIN returned every content-matched batch in exactly the order it
+    was sent. Row id is not that order: the packer seats rows from a later chunk into a batch
+    already opened, and 1.5% of batches went out that way. Lined up by id, a refused
+    child's error lands on a valid sibling and the refused one is sent again. Rows the sent
+    list does not place (a parent from before it was kept) follow in id order.
+    """
+    sent = (parent.payload or {}).get("children") or []
+    left = list(rows)
+    ordered: list[SimulationRecord] = []
+    for child in sent:
+        match = next((r for r in left if r.payload == child), None)
+        if match is not None:
+            ordered.append(match)
+            left.remove(match)
+    return ordered + left
 
 
 #: Labs whose candidates the Pre-screen ranks before they are queued.
