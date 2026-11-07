@@ -13,13 +13,25 @@ import re
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
-from ..brain.platform import GROUPING_FIELDS, UNCOUNTED_OPERATORS
+from ..brain.platform import (
+    GEOGRAPHY_GROUPS,
+    GROUPING_FIELDS,
+    INDUSTRY_GROUPS,
+    UNCOUNTED_OPERATORS,
+)
 
 if TYPE_CHECKING:
     import random
     from collections.abc import Set as AbstractSet
 
 COMPARISONS = ("==", "!=", "<", "<=", ">", ">=")
+#: Fields BRAIN types as a group rather than a number: they only go where a group is taken.
+#: ``split`` and ``adjfactor`` are grouping fields by count but numbers by unit.
+GROUP_UNITS = frozenset({"market", *INDUSTRY_GROUPS, *GEOGRAPHY_GROUPS})
+#: Operators that return a group: only a group input takes them.
+GROUP_MAKERS = frozenset({"densify", "group_cartesian_product", "bucket"})
+#: Operators whose every positional input is a group.
+GROUP_ONLY = frozenset({"densify", "group_cartesian_product"})
 
 
 class ParseError(ValueError):
@@ -78,11 +90,23 @@ def operator_table(
         table[name] = OperatorInfo(
             name=name,
             category=str(operator.get("category") or ""),
-            required=sum(1 for p in params if "=" not in p and ".." not in p),
+            required=sum(1 for p in params if _required(p)),
             maximum=None if variadic else len(params),
             params=tuple(params),
         )
     return table
+
+
+def param_name(param: str) -> str:
+    """A parameter's name as a keyword would give it: ``y`` for ``y ..`` or ``y = 0``, and
+    nothing for a bare ``..``."""
+    return param.split("=")[0].replace("..", "").strip()
+
+
+def _required(param: str) -> bool:
+    """Whether a parameter has no default. ``min(x, y ..)`` writes its second, required, input
+    and the ellipsis as one parameter: it takes two inputs or more, not one."""
+    return "=" not in param and bool(param_name(param))
 
 
 def _signature_params(definition: str, start: int) -> list[str] | None:
@@ -444,7 +468,9 @@ def guarded(parent: Node | None, path: Path) -> bool:
         return False
     if path[-1] >= len(parent.args):
         return True
-    return parent.kind == "call" and parent.value.startswith("group_") and path[-1] >= 1
+    return parent.kind == "call" and (
+        parent.value in GROUP_ONLY or (parent.value.startswith("group_") and path[-1] >= 1)
+    )
 
 
 # -- changing --------------------------------------------------------------
@@ -459,17 +485,28 @@ def crossover(rng: random.Random, left: Node, right: Node) -> Node | None:
     return graft(rng, left, graft_sites(left), grafts(right))
 
 
+def _graftable(node: Node, parent: Node | None, path: Path) -> bool:
+    """A call that holds a signal, outside the grouping and keyword slots."""
+    return node.kind == "call" and node.value not in GROUP_MAKERS and not guarded(parent, path)
+
+
 def graft_sites(tree: Node) -> list[Path]:
     """Where :func:`crossover` may graft into ``tree``: any call but the root, outside the
-    grouping and keyword slots."""
+    grouping and keyword slots. In a program of statements the last statement is the root
+    and an assignment is not a call, so a site is always inside a statement."""
     return [
-        p for p, n, up in walk_with_parents(tree) if p and n.kind == "call" and not guarded(up, p)
+        p
+        for p, n, up in walk_with_parents(tree)
+        if p and not (tree.kind == "seq" and len(p) == 1) and _graftable(n, up, p)
     ]
 
 
 def grafts(tree: Node) -> list[Node]:
-    """The calls :func:`crossover` may take from ``tree``."""
-    return [n for p, n, up in walk_with_parents(tree) if n.kind == "call" and not guarded(up, p)]
+    """The calls :func:`crossover` may take from ``tree``, each standing on its own: a call
+    reading a name assigned earlier carries what that name holds, so it never brings a
+    name into a program that does not assign it."""
+    found = [n for v in expanded(tree) for p, n, up in walk_with_parents(v) if _graftable(n, up, p)]
+    return list(dict.fromkeys(found))
 
 
 def graft(rng: random.Random, left: Node, sites: list[Path], taken: list[Node]) -> Node | None:
@@ -478,6 +515,148 @@ def graft(rng: random.Random, left: Node, sites: list[Path], taken: list[Node]) 
         return None
     child = replace_at(left, rng.choice(sites), rng.choice(taken))
     return None if child == left else child
+
+
+# -- statements ------------------------------------------------------------
+
+
+def statements(tree: Node) -> tuple[Node, ...]:
+    """The program's statements in order; a lone expression is a program of one."""
+    return tree.args if tree.kind == "seq" else (tree,)
+
+
+def reads(node: Node) -> set[str]:
+    """The names an expression reads, keyword values (options, not data) aside."""
+    return {
+        n.value
+        for path, n, parent in walk_with_parents(node)
+        if n.kind == "name" and not (parent is not None and path[-1] >= len(parent.args))
+    }
+
+
+def _value(statement: Node) -> Node:
+    return statement.args[0] if statement.kind == "assign" and statement.args else statement
+
+
+def _substitute(node: Node, env: dict[str, Node]) -> Node:
+    """``node`` with each name in ``env`` replaced by what it holds."""
+    if node.kind == "name":
+        return env.get(node.value, node)
+    if not node.args and not node.kwargs:
+        return node
+    return replace(
+        node,
+        args=tuple(_substitute(a, env) for a in node.args),
+        kwargs=tuple((k, _substitute(v, env)) for k, v in node.kwargs),
+    )
+
+
+def expanded(tree: Node) -> list[Node]:
+    """Each statement's value with every name assigned before it replaced by what it holds."""
+    env: dict[str, Node] = {}
+    found: list[Node] = []
+    for statement in statements(tree):
+        value = _substitute(_value(statement), env)
+        if statement.kind == "assign":
+            env[statement.value] = value
+        found.append(value)
+    return found
+
+
+def prune(tree: Node) -> Node:
+    """``tree`` without the assignments nothing after them reads, which BRAIN refuses
+    ("Found unused variables"). Removing one can leave another unread, so liveness runs
+    backwards from the last statement; a program left with one statement is that statement."""
+    if tree.kind != "seq":
+        return tree
+    kept: list[Node] = []
+    live: set[str] = set()
+    for index, statement in enumerate(reversed(tree.args)):
+        if statement.kind == "assign" and index and statement.value not in live:
+            continue
+        if statement.kind == "assign":
+            live.discard(statement.value)
+        live |= reads(_value(statement))
+        kept.append(statement)
+    kept.reverse()
+    if len(kept) == len(tree.args):
+        return tree
+    return kept[0] if len(kept) == 1 else Node("seq", args=tuple(kept))
+
+
+def scope_problems(tree: Node) -> list[str]:
+    """Why BRAIN would refuse the program's names: a name read before it is assigned (or by
+    its own assignment), an assignment nothing reads, or a program that ends assigning."""
+    problems: list[str] = []
+    program = statements(tree)
+    assigned = {s.value for s in program if s.kind == "assign"}
+    defined: set[str] = set()
+    for statement in program:
+        early = sorted((reads(_value(statement)) & assigned) - defined)
+        problems.extend(f"{name} is read before it is assigned." for name in early)
+        if statement.kind == "assign":
+            defined.add(statement.value)
+    for index, statement in enumerate(program[:-1]):
+        if statement.kind == "assign" and not any(
+            statement.value in reads(_value(s)) for s in program[index + 1 :]
+        ):
+            problems.append(f"{statement.value} is assigned but never read.")
+    if program[-1].kind == "assign":
+        problems.append("The expression ends with an assignment, not a value.")
+    return problems
+
+
+def group_inputs(node: Node, table: dict[str, OperatorInfo] | None = None) -> set[int]:
+    """The positional inputs of a call that take a group rather than a number."""
+    if node.kind != "call":
+        return set()
+    if node.value in GROUP_ONLY:
+        return set(range(len(node.args)))
+    info = (table or {}).get(node.value)
+    if info is not None and info.params:
+        return {i for i, p in enumerate(info.params[: len(node.args)]) if param_name(p) == "group"}
+    return {1} if node.value.startswith("group_") and len(node.args) > 1 else set()
+
+
+def unit_problems(
+    tree: Node,
+    table: dict[str, OperatorInfo] | None = None,
+    group_fields: AbstractSet[str] = GROUP_UNITS,
+) -> list[str]:
+    """Where a group stands in for a number or a number for a group, which BRAIN refuses
+    ("Incompatible unit", "Expression ends with group unit value"). ``group_fields`` are the
+    fields BRAIN types as groups, the market's own classifications among them."""
+    problems: list[str] = []
+    groups: dict[str, bool] = {}
+
+    def is_group(node: Node) -> bool:
+        if node.kind == "name":
+            return groups.get(node.value, node.value in group_fields)
+        if node.kind == "call":
+            wanted = group_inputs(node, table)
+            for index, arg in enumerate(node.args):
+                if is_group(arg) != (index in wanted):
+                    taken = "a group" if index in wanted else "a number, not a group"
+                    problems.append(f"{node.value} takes {taken} at input {index + 1}.")
+            for _, value in node.kwargs:
+                is_group(value)
+            return node.value in GROUP_MAKERS
+        # Every input is read, not just up to the first group: each may hold problems of its own.
+        inputs = [is_group(arg) for arg in node.args]
+        if node.kind in ("unary", "binary", "ternary") and True in inputs:
+            problems.append(f"A group cannot go into {node.value or 'a condition'}.")
+        return False
+
+    ends_with_group = False
+    for statement in statements(tree):
+        found = is_group(_value(statement))
+        if statement.kind == "assign":
+            groups[statement.value] = found
+        else:
+            ends_with_group = found
+    if ends_with_group:
+        problems.append("The expression ends with a group, not a value.")
+    return list(dict.fromkeys(problems))
 
 
 def validate(
@@ -496,11 +675,9 @@ def validate(
             count = len(node.args)
             supplied = count + len(node.kwargs)
             # A required input may be named rather than placed: kth_element(x, 15, k = 1).
-            names = [p.split("=")[0].strip() for p in info.params]
+            names = [param_name(p) for p in info.params]
             given = {*names[:count], *(key for key, _ in node.kwargs)}
-            required = [
-                n for p, n in zip(info.params, names, strict=True) if "=" not in p and ".." not in p
-            ]
+            required = [n for p, n in zip(info.params, names, strict=True) if _required(p)]
             short = any(n not in given for n in required) if info.params else count < info.required
             if short or (info.maximum is not None and supplied > info.maximum):
                 problems.append(f"{node.value} does not take {supplied} inputs.")
@@ -580,24 +757,12 @@ def inline(tree: Node) -> Node:
     if tree.kind != "seq":
         return tree
     env: dict[str, Node] = {}
-
-    def sub(node: Node) -> Node:
-        if node.kind == "name" and node.value in env:
-            return env[node.value]
-        if not node.args and not node.kwargs:
-            return node
-        return replace(
-            node,
-            args=tuple(sub(a) for a in node.args),
-            kwargs=tuple((k, sub(v)) for k, v in node.kwargs),
-        )
-
     last = tree
     for statement in tree.args:
         if statement.kind == "assign" and statement.args:
-            env[statement.value] = sub(statement.args[0])
+            env[statement.value] = _substitute(statement.args[0], env)
         else:
-            last = sub(statement)
+            last = _substitute(statement, env)
     return last if last is not tree else (next(iter(env.values()), tree) if env else tree)
 
 

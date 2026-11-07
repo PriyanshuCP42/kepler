@@ -43,6 +43,8 @@ from ..vault.store import EVOLVABLE_TYPES, SEEDABLE
 from ..vault.yields import SUBMITTED, checks_of, is_submitted, limits_of
 from . import search
 from .fastexpr import (
+    GROUP_MAKERS,
+    GROUP_UNITS,
     Node,
     OperatorInfo,
     ParseError,
@@ -50,14 +52,19 @@ from .fastexpr import (
     graft,
     graft_sites,
     grafts,
+    group_inputs,
     guarded,
     lint,
     node_at,
     operator_count,
     operator_table,
+    param_name,
     parse,
+    prune,
     relabel,
     render,
+    scope_problems,
+    unit_problems,
     validate,
     walk_with_parents,
 )
@@ -83,8 +90,9 @@ PATIENCE = 1_000
 MAX_EXAMINED = 200
 STALLED = "Stopped early: no new best Train Fitness in the last 1,000 simulations."
 #: Never swapped in: ``ts_step`` takes no input a seed can give, vector operators prepare a
-#: field rather than make a signal, and the other two categories are not for Alphas.
-NOT_SWAPPED = frozenset({"ts_step"})
+#: field rather than make a signal, and the other two categories are not for Alphas. Nor
+#: in or out: an operator returning a group, which a peer returning a number cannot replace.
+NOT_SWAPPED = frozenset({"ts_step", *GROUP_MAKERS})
 NOT_SWAPPED_CATEGORIES = frozenset({"Vector", "Special", "Reduce"})
 
 
@@ -194,7 +202,7 @@ def stalled(values: list[float | None]) -> bool:
 
 def _inputs(info: OperatorInfo, count: int) -> tuple[str, ...]:
     """The names of an operator's first ``count`` inputs, e.g. ``("x", "d")``."""
-    return tuple(p.split("=")[0].strip() for p in info.params[:count])
+    return tuple(param_name(p) for p in info.params[:count])
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,11 +218,38 @@ class Market:
     #: Every field of the market and the grouping fields: what a child may name.
     names: frozenset[str]
     neutralizations: tuple[str, ...]
+    #: Vector fields, which BRAIN reads only through a ``vec_`` operator.
+    vectors: frozenset[str] = frozenset()
+    #: Fields BRAIN types as groups: they go only where a group is taken.
+    groups: frozenset[str] = GROUP_UNITS
+
+    def problems(self, tree: Node) -> list[str]:
+        """Why BRAIN would refuse this expression, checked here so it costs no simulation:
+        unknown operators and names, the inputs each operator takes, names read before they
+        are assigned or assigned and never read, a group where a number goes or the other
+        way round, and a vector field read without a ``vec_`` operator."""
+        found = [
+            *validate(tree, self.table, self.names),
+            *scope_problems(tree),
+            *unit_problems(tree, self.table, self.groups),
+        ]
+        for _, node, parent in walk_with_parents(tree):
+            if node.kind != "name" or node.value not in self.vectors:
+                continue
+            info = self.table.get(parent.value) if parent and parent.kind == "call" else None
+            if info is None or info.category != "Vector":
+                found.append(f"{node.value} is a vector field: read it through a vec_ operator.")
+        return list(dict.fromkeys(found))
 
     def peers(self, node: Node) -> list[str]:
         """Operators that can stand in for this call: same category, the same inputs."""
         info = self.table.get(node.value)
-        if info is None or node.kwargs or node.value in UNCOUNTED_OPERATORS:
+        if (
+            info is None
+            or node.kwargs
+            or node.value in UNCOUNTED_OPERATORS
+            or node.value in NOT_SWAPPED
+        ):
             return []
         count = len(node.args)
         inputs = _inputs(info, count)
@@ -244,16 +279,16 @@ class Market:
                     if name == "d" and arg.kind == "num" and arg.value.isdigit():
                         found.append(((*path, index), "window"))
             elif node.kind == "name":
-                grouping = (
-                    parent is not None
-                    and parent.kind == "call"
-                    and parent.value.startswith("group_")
-                    and 1 <= path[-1] < len(parent.args)
-                )
+                grouping = parent is not None and path[-1] in group_inputs(parent, self.table)
                 dataset = self.dataset_of.get(node.value)
                 if grouping and node.value in search.GROUPS:
                     found.append((path, "group"))
-                elif dataset and not guarded(parent, path) and len(self.by_dataset[dataset]) > 1:
+                elif (
+                    dataset
+                    and node.value not in GROUP_UNITS
+                    and not guarded(parent, path)
+                    and len(self.by_dataset[dataset]) > 1
+                ):
                     found.append((path, "field"))
         return found
 
@@ -292,6 +327,9 @@ def build_market(
         by_dataset={k: tuple(v) for k, v in by_dataset.items()},
         names=frozenset(str(f["field_id"]) for f in fields) | frozenset(search.GROUPS),
         neutralizations=tuple(neutralizations),
+        vectors=frozenset(str(f["field_id"]) for f in fields if f.get("field_type") == "VECTOR"),
+        groups=GROUP_UNITS
+        | frozenset(str(f["field_id"]) for f in fields if f.get("field_type") == "GROUP"),
     )
 
 
@@ -327,7 +365,7 @@ def unreadable(expression: str | None, market: Market) -> str | None:
         tree = parse(expression or "")
     except ParseError as exc:
         return f"Its expression could not be read: {exc}"
-    problems = validate(tree, market.table, market.names)
+    problems = market.problems(tree)
     return problems[0] if problems else None
 
 
@@ -479,12 +517,24 @@ def child(
             "truncation": left.truncation,
         }
         tree, settings = mutate(rng, tree, settings, market, rate)
+        tree = prune(tree)
         if clone(tree, settings):
             tree, settings = mutate(rng, tree, settings, market, 0.0, force=True)
-        if clone(tree, settings) or validate(tree, market.table, market.names) or lint(tree):
+            tree = prune(tree)
+        if clone(tree, settings) or market.problems(tree) or lint(tree):
             continue
         return tree, settings
     return None
+
+
+def sendable(expression: str | None, market: Market) -> list[str]:
+    """Why this child's text must not be simulated, or nothing: BRAIN counts a refused
+    simulation against the day's quota, so every check runs here first."""
+    try:
+        tree = parse(expression or "")
+    except ParseError as exc:
+        return [f"Its expression could not be read: {exc}"]
+    return market.problems(tree)
 
 
 def request_for(tree: Node, settings: dict[str, Any], run: EvolutionParams) -> SimulationRequest:
@@ -748,6 +798,11 @@ async def breed(
         if made is None:
             continue
         request = request_for(*made, run)
+        # The last word before quota is spent: what goes to BRAIN is the text, so the text
+        # is read back and checked again rather than trusting the tree it came from.
+        if problems := sendable(request.regular, market):
+            log.warning("ga.child_refused", study_id=row.id, problem=problems[0])
+            continue
         key = ga_key(request.regular, request.settings.model_dump(by_alias=True, exclude_none=True))
         if key in seen:
             continue
