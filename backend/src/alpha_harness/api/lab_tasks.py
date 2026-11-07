@@ -906,6 +906,9 @@ SHORT_HISTORY = "SHORT_HISTORY"
 #: Kepler's own refusal for a pure Power Pool Alpha no Power Pool theme covers this month:
 #: BRAIN refuses it with "Pure Power Pool submission does not match any Power Pool Theme".
 OFF_THEME = "OFF_THEME"
+#: BRAIN's warning that it "may not accept these alphas in the future": the expression bets on
+#: past price moves reversing. Held back so nothing is built on a soon-refused idea.
+REVERSION_COMPONENT = "REVERSION_COMPONENT"
 
 
 def short_history(vault: dict[str, Any]) -> bool:
@@ -934,15 +937,22 @@ def _merged(
     Held back, with the reason, however clean the checks it has so far read: an Alpha with a
     short history; a pure Power Pool Alpha no theme covers this month (its simulation leaves
     the regular limits it misses as warnings, which BRAIN's submission check then refuses);
-    and one whose Production Correlation BRAIN has measured at the ceiling or above, unless
-    BRAIN's own check has since passed it (a Sharpe 10% above each production Alpha it
-    repeats lets it in)."""
+    one BRAIN warns has a reversion component, which it may stop accepting; and one whose
+    Production Correlation BRAIN has measured at the ceiling or above, unless BRAIN's own check
+    has since passed it (a Sharpe 10% above each production Alpha it repeats lets it in)."""
     merged = row | {k: v for k, v in vault.items() if k not in _FIGURES or row.get(k) is None}
     held: list[str] = []
     if short_history(stored):
         held.append(SHORT_HISTORY)
     if themes and off_theme(stored | {"checks": checks or stored.get("checks")}, themes):
         held.append(OFF_THEME)
+    kept = stored.get("checks")
+    read = checks if checks is not None else kept if isinstance(kept, list) else checks_of(kept)
+    if any(
+        c.get("name") == REVERSION_COMPONENT and c.get("result") in ("WARNING", "FAIL")
+        for c in read or []
+    ):
+        held.append(REVERSION_COMPONENT)
     production = vault.get("prodCorrelation")
     if (
         isinstance(production, int | float)

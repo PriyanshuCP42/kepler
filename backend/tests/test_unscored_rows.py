@@ -119,3 +119,17 @@ def test_a_pure_power_pool_alpha_no_theme_covers_is_held_back():
     assert missed["refusedBy"] == [lab_tasks.OFF_THEME]
     # Themes unknown: nothing is held back for want of them.
     assert lab_tasks._merged(row, {}, gbr, themes=[], checks=checks(1.25))["submittable"]
+
+
+def test_an_alpha_brain_warns_has_a_reversion_component_is_held_back():
+    row = {"alphaId": "a1", "submittable": True, "pending": True}
+    row |= {"failedChecks": [], "refusedBy": []}
+    warned = [{"name": "REVERSION_COMPONENT", "result": "WARNING"}]
+    held = lab_tasks._merged(row, {}, {}, checks=warned)
+    assert held["submittable"] is False
+    assert held["refusedBy"] == [lab_tasks.REVERSION_COMPONENT]
+    # Read from the stored checks when BRAIN's latest check is not to hand.
+    stored = {"checks": warned}
+    assert lab_tasks._merged(row, {}, stored)["refusedBy"] == [lab_tasks.REVERSION_COMPONENT]
+    clean = [{"name": "REVERSION_COMPONENT", "result": "PASS"}]
+    assert lab_tasks._merged(row, {}, {}, checks=clean)["submittable"] is True
