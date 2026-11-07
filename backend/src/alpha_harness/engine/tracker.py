@@ -65,6 +65,10 @@ SWEEP_SECONDS = 60.0
 #: everything else, before it is given up on. BRAIN occasionally loses one: it then can
 #: neither report on it nor cancel it, and waiting on it holds a core for good.
 LOST_AFTER_SECONDS = 30 * 60
+#: How recently another simulation read must have succeeded to count as BRAIN being up.
+ANSWERED_WITHIN_SECONDS = 5 * 60
+#: How often the fallback liveness probe may run when nothing else was read lately.
+PROBE_EVERY_SECONDS = 60.0
 LOST = (
     "BRAIN answered every read of this simulation with a server error for 30 minutes while "
     "answering everything else, so it is no longer waited on."
@@ -114,6 +118,11 @@ class SimulationTracker:
         self._next_poll: dict[str, float] = {}
         #: Platform id -> monotonic time its reads started failing with a server error.
         self._failing_since: dict[str, float] = {}
+        #: Monotonic time BRAIN last answered any simulation read without a server error:
+        #: proof it is up, so one simulation failing on its own is lost, not an outage.
+        self._answered_at: float | None = None
+        #: When the fallback liveness probe last ran, and whether BRAIN answered it.
+        self._probed: tuple[float, bool] | None = None
         #: Platform id -> its progress when last seen to change, and when (monotonic).
         self._progress_since: dict[str, tuple[float | None, float]] = {}
         #: Adopted rows this process is sending right now. Their ``created_at`` is when
@@ -581,6 +590,8 @@ class SimulationTracker:
         outcome = read_outcome(response.status, response.body, response.retry_after)
         if outcome.kind != "retry" or response.status < 500:
             self._failing_since.pop(platform_id, None)
+            if response.status < 400:
+                self._answered_at = time.monotonic()
         elif await self._lost(platform_id):
             log.warning("sim.lost", platform_id=platform_id)
             outcome, body = Outcome("gone", SimStatus.ERROR, message=LOST), {}
@@ -605,17 +616,28 @@ class SimulationTracker:
     async def _lost(self, platform_id: str) -> bool:
         """Whether BRAIN has lost this simulation rather than being down altogether.
 
-        Only once its reads have failed for :data:`LOST_AFTER_SECONDS`, and only if BRAIN
-        still answers the cheapest read there is: in an outage every simulation fails the
-        same way, and giving up on them would throw away results that are still coming.
+        Only once its reads have failed for :data:`LOST_AFTER_SECONDS`, and only if BRAIN is
+        up: in an outage every simulation fails the same way, and giving up on them would
+        throw away results that are still coming.
+
+        BRAIN is up when it answered another simulation read in the last
+        :data:`ANSWERED_WITHIN_SECONDS`. Only when nothing else was read is the cheapest read
+        there is asked, at most once per :data:`PROBE_EVERY_SECONDS`: asking it on every
+        failed read drew 429s from ``/authentication``, each counted as "down", so lost
+        simulations were polled for days and a lost batch held its core.
         """
         now = time.monotonic()
         if now - self._failing_since.setdefault(platform_id, now) < LOST_AFTER_SECONDS:
             return False
-        try:
-            await self.endpoints.get_auth()
-        except BrainError:
-            return False
+        if self._answered_at is None or now - self._answered_at > ANSWERED_WITHIN_SECONDS:
+            if self._probed is None or now - self._probed[0] >= PROBE_EVERY_SECONDS:
+                try:
+                    await self.endpoints.get_auth()
+                    self._probed = (now, True)
+                except BrainError:
+                    self._probed = (now, False)
+            if not self._probed[1]:
+                return False
         self._failing_since.pop(platform_id, None)
         return True
 
