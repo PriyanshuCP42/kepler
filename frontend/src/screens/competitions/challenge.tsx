@@ -6,10 +6,8 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { useMemo } from 'react'
-import type { ChallengeTab } from '@/api/core'
+import { type ChallengeCandidate, type ChallengeTab, competitions } from '@/api/core'
 import { fmt } from '@/lib/format'
-import { labTasks, type TaskAlpha } from '@/screens/tasks/api'
 import { Badge, Empty, ErrorNotice, LINK, Metric, Notice, Panel, Skeleton } from '@/ui/kit'
 
 const REASON: Record<string, string> = {
@@ -17,43 +15,45 @@ const REASON: Record<string, string> = {
   WRONG_REGION: 'not USA or GLB',
   PROD_CORRELATION: 'production correlation too high',
   PROD_NOT_MEASURED: 'production correlation not measured yet',
+  OUTSIDE_POWER_POOL_LIMITS: 'over Power Pool limits',
+  NEEDS_REGULAR_OR_THEME: 'not regular and off theme',
+  LOWERS_A_POOL: 'lowers a pool',
+  EFFECT_NOT_MEASURED: 'effect not measured',
 }
 
-/** How many candidates to list: a day's worth of choices, not the whole vault. */
-const CANDIDATES = 15
-
-const regionOf = (a: TaskAlpha) => String(a.settings?.['region'] ?? '')
+/** A pool's Sharpe change, signed, or a dash when it was not measured. */
+function Change({ effect }: { effect: ChallengeCandidate['whole'] }) {
+  if (effect?.after == null) return <span className="text-ink-subtle">—</span>
+  const change = effect.after - (effect.before ?? 0)
+  return (
+    <span className={change >= 0 ? 'text-pnl-positive-text' : 'text-pnl-negative-text'}>
+      {change >= 0 ? '+' : ''}
+      {fmt.ratio(change, 3)}
+    </span>
+  )
+}
 
 function Candidates({ challenge: c }: { challenge: ChallengeTab }) {
-  const query = useQuery({ queryKey: ['submittable-alphas'], queryFn: labTasks.submittable })
-  const counted = c.entries.filter((e) => e.eligible && e.prodCorrelation != null)
-  const total = counted.reduce((sum, e) => sum + (e.prodCorrelation ?? 0), 0)
-  const rows = useMemo(() => {
-    const seen = new Set<string>()
-    return (query.data ?? [])
-      .filter((a) => {
-        if (!a.alphaId || seen.has(a.alphaId)) return false
-        seen.add(a.alphaId)
-        return (
-          a.submittable &&
-          c.rules.regions.includes(regionOf(a)) &&
-          a.prodCorrelation != null &&
-          a.prodCorrelation < c.rules.maxProd
-        )
-      })
-      .sort((a, b) => (a.prodCorrelation ?? 1) - (b.prodCorrelation ?? 1))
-      .slice(0, CANDIDATES)
-  }, [query.data, c.rules])
-
+  const query = useQuery({
+    queryKey: ['competitions', 'challenges', c.id, 'candidates'],
+    queryFn: () => competitions.challengeCandidates(c.id),
+  })
+  const rows = query.data?.candidates ?? []
+  const qualifying = rows.filter((r) => r.qualifies).length
   return (
     <Panel
-      title="Best Candidates for the Ranking"
-      description={`Submittable ${c.rules.regions.join('/')} Alphas with a measured production correlation below ${fmt.ratio(c.rules.maxProd, 1)}, lowest first. "Average After" is your ranking metric if you submit that one next. Check each is not a lookalike of a recent submission.`}
+      title="Best Candidates"
+      description={`Submittable ${c.rules.regions.join('/')} Alphas under ${fmt.ratio(c.rules.maxProd, 1)} production correlation. They qualify within Power Pool's limits, as regular Alphas or ones matching the month's theme, raising both your combined and your Power Pool Sharpe. Qualifying ones come first, lowest production correlation first. Check each is not a lookalike of a recent submission.`}
+      actions={
+        query.data && (
+          <Badge tone={qualifying ? 'profit' : 'warn'}>{fmt.int(qualifying)} qualify</Badge>
+        )
+      }
     >
       {query.isError ? (
-        <ErrorNotice error={query.error} title="Could not read the submittable Alphas" />
+        <ErrorNotice error={query.error} title="Could not measure the candidates" />
       ) : query.isPending ? (
-        <Skeleton label="Reading submittable Alphas" />
+        <Skeleton label="Measuring candidates against your pools" />
       ) : rows.length === 0 ? (
         <Empty title="No measured candidate yet">
           Candidates appear once their production correlation is measured: run BRAIN's check on an
@@ -68,37 +68,46 @@ function Candidates({ challenge: c }: { challenge: ChallengeTab }) {
                 <th className="py-1.5 pr-3 font-medium">Market</th>
                 <th className="py-1.5 pr-3 text-right font-medium">Prod Corr</th>
                 <th className="py-1.5 pr-3 text-right font-medium">Average After</th>
-                <th className="py-1.5 pr-3 text-right font-medium">Sharpe</th>
-                <th className="py-1.5 pr-3 text-right font-medium">Fitness</th>
-                <th className="py-1.5 font-medium">Check</th>
+                <th className="py-1.5 pr-3 text-right font-medium">Ops / Fields</th>
+                <th className="py-1.5 pr-3 text-right font-medium">PP Corr</th>
+                <th className="py-1.5 pr-3 text-right font-medium">Combined Sharpe</th>
+                <th className="py-1.5 pr-3 text-right font-medium">PP Sharpe</th>
+                <th className="py-1.5 font-medium">Verdict</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((a) => (
-                <tr key={a.alphaId ?? ''} className="border-b border-hairline last:border-0">
+                <tr key={a.alphaId} className="border-b border-hairline last:border-0">
                   <td className="py-1.5 pr-3">
-                    <Link
-                      to="/alpha/$alphaId"
-                      params={{ alphaId: a.alphaId ?? '' }}
-                      className={LINK}
-                    >
+                    <Link to="/alpha/$alphaId" params={{ alphaId: a.alphaId }} className={LINK}>
                       {a.alphaId}
                     </Link>
                   </td>
                   <td className="py-1.5 pr-3 text-ink-muted">
-                    {regionOf(a)} {String(a.settings?.universe ?? '')}
+                    {a.region} {a.universe}
+                    {a.themeMatch ? ' · theme' : a.regular ? ' · regular' : ''}
                   </td>
                   <td className="num py-1.5 pr-3 text-right">{fmt.ratio(a.prodCorrelation)}</td>
+                  <td className="num py-1.5 pr-3 text-right">{fmt.ratio(a.averageAfter)}</td>
                   <td className="num py-1.5 pr-3 text-right">
-                    {fmt.ratio((total + (a.prodCorrelation ?? 0)) / (counted.length + 1))}
+                    {fmt.int(a.operators)} / {fmt.int(a.fields)}
                   </td>
-                  <td className="num py-1.5 pr-3 text-right">{fmt.ratio(a.sharpe)}</td>
-                  <td className="num py-1.5 pr-3 text-right">{fmt.ratio(a.fitness)}</td>
+                  <td className="num py-1.5 pr-3 text-right">
+                    {fmt.ratio(a.powerPoolCorrelation)}
+                  </td>
+                  <td className="num py-1.5 pr-3 text-right">
+                    <Change effect={a.whole} />
+                  </td>
+                  <td className="num py-1.5 pr-3 text-right">
+                    <Change effect={a.power} />
+                  </td>
                   <td className="py-1.5">
-                    {a.pending ? (
-                      <Badge tone="warn">Needs BRAIN check</Badge>
+                    {a.qualifies ? (
+                      <Badge tone={a.pending ? 'warn' : 'profit'}>
+                        {a.pending ? 'Qualifies · needs BRAIN check' : 'Qualifies'}
+                      </Badge>
                     ) : (
-                      <Badge tone="profit">Checked</Badge>
+                      <Badge tone="muted">{a.reasons.map((r) => REASON[r] ?? r).join(', ')}</Badge>
                     )}
                   </td>
                 </tr>

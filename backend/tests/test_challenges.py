@@ -67,3 +67,22 @@ def test_a_brain_timestamp_is_read_on_brains_calendar():
 
 def test_adding_a_low_correlation_alpha_lowers_the_average():
     assert round(ch.average_after([0.6, 0.6], 0.3), 2) == 0.5
+
+
+def test_a_candidate_qualifies_only_within_power_pool_limits_and_lifting_both_pools():
+    from alpha_harness.api.competitions import PoolEffect, assess
+
+    up = PoolEffect(members=10, before=7.0, after=7.1)
+    down = PoolEffect(members=10, before=7.0, after=6.9)
+    ok = {"power_ok": True, "regular": False, "theme_match": True}
+    assert assess(**ok, whole=up, power=up) == (True, [])
+    # Lowers the Power Pool combo: not wanted however low its correlation.
+    assert assess(**ok, whole=up, power=down) == (False, ["LOWERS_A_POOL"])
+    # A pure Power Pool Alpha outside the theme cannot be submitted.
+    off = {**ok, "theme_match": False}
+    assert assess(**off, whole=up, power=up)[1] == ["NEEDS_REGULAR_OR_THEME"]
+    # A regular one needs no theme; one over the limits never qualifies.
+    assert assess(**{**off, "regular": True}, whole=up, power=up)[1] == []
+    big = {**ok, "power_ok": False}
+    assert assess(**big, whole=up, power=up)[1] == ["OUTSIDE_POWER_POOL_LIMITS"]
+    assert assess(**ok, whole=None, power=up) == (None, ["EFFECT_NOT_MEASURED"])

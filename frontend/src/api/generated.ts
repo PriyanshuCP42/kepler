@@ -984,6 +984,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/competitions/challenges/{challenge_id}/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Challenge Candidates
+         * @description The submittable Alphas that best serve a challenge, Power Pool and both pools at once.
+         *
+         *     Of the submittable Alphas in the challenge's regions with a measured production
+         *     correlation under its ceiling, the lowest few are sized as Power Pool counts them, matched
+         *     against the month's theme, and measured against your combined and Power Pool pools.
+         *     Those meeting every condition come first, lowest production correlation first.
+         */
+        get: operations["challenge_candidates_api_competitions_challenges__challenge_id__candidates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/desk": {
         parameters: {
             query?: never;
@@ -3621,6 +3646,58 @@ export interface components {
             /** Name */
             name: string | null;
         };
+        /** ChallengeCandidate */
+        ChallengeCandidate: {
+            /** Alphaid */
+            alphaId: string;
+            /** Averageafter */
+            averageAfter: number;
+            /** Expression */
+            expression: string | null;
+            /** Fields */
+            fields: number | null;
+            /** Fitness */
+            fitness: number | null;
+            /** Improves */
+            improves: boolean | null;
+            /** Operators */
+            operators: number | null;
+            /** Pending */
+            pending: boolean;
+            power: components["schemas"]["PoolEffect"] | null;
+            /** Powerpoolcorrelation */
+            powerPoolCorrelation: number | null;
+            /** Powerpoolok */
+            powerPoolOk: boolean;
+            /** Prodcorrelation */
+            prodCorrelation: number;
+            /** Qualifies */
+            qualifies: boolean;
+            /** Reasons */
+            reasons: string[];
+            /** Region */
+            region: string | null;
+            /** Regular */
+            regular: boolean;
+            /** Sharpe */
+            sharpe: number | null;
+            /** Themematch */
+            themeMatch: boolean | null;
+            /** Turnover */
+            turnover: number | null;
+            /** Universe */
+            universe: string | null;
+            whole: components["schemas"]["PoolEffect"] | null;
+        };
+        /** ChallengeCandidates */
+        ChallengeCandidates: {
+            /** Averageprod */
+            averageProd: number | null;
+            /** Candidates */
+            candidates: components["schemas"]["ChallengeCandidate"][];
+            /** Challengeid */
+            challengeId: string;
+        };
         /** ChallengeDay */
         ChallengeDay: {
             /** Day */
@@ -5511,6 +5588,18 @@ export interface components {
             topics: string[];
             /** Total */
             total: number;
+        };
+        /**
+         * PoolEffect
+         * @description A pool's Sharpe before and after the candidate joins it.
+         */
+        PoolEffect: {
+            /** After */
+            after: number | null;
+            /** Before */
+            before: number | null;
+            /** Members */
+            members: number;
         };
         /** PortfolioMember */
         PortfolioMember: {
@@ -9019,6 +9108,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Challenges"];
+                };
+            };
+        };
+    };
+    challenge_candidates_api_competitions_challenges__challenge_id__candidates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                challenge_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChallengeCandidates"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

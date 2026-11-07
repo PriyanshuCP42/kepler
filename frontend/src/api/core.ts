@@ -42,9 +42,15 @@ export const competitions = {
   list: () => http.get<Schemas['Competitions']>('/api/competitions'),
   /** Consultant challenges, from Kepler's own records: answers while signed out. */
   challenges: () => http.get<Schemas['Challenges']>('/api/competitions/challenges'),
+  /** Submittable Alphas sized for Power Pool and measured against both of your pools. */
+  challengeCandidates: (id: string) =>
+    http.get<Schemas['ChallengeCandidates']>(
+      `/api/competitions/challenges/${encodeURIComponent(id)}/candidates`,
+    ),
 }
 
 export type ChallengeTab = Schemas['ChallengeTab']
+export type ChallengeCandidate = Schemas['ChallengeCandidate']
 
 export const today = {
   /** The first screen in one call. Scope defaults to USA / D1 / TOP3000. */

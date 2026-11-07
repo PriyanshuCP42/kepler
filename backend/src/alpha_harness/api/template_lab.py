@@ -441,6 +441,13 @@ async def _stats(
     return found
 
 
+async def sizes(
+    state: Any, expressions: list[str], region: str, delay: int
+) -> list[dict[str, Any]]:
+    """Each expression's operators and fields as Power Pool counts them, in order."""
+    return await _stats(state, [StatsItem(text=e) for e in expressions], region, delay)
+
+
 @router.post("/stats")
 async def stats(body: StatsRequest, state: State) -> TemplateStatsList:
     """Each template's operators and fields, and whether its Alphas are Power Pool or single

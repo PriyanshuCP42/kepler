@@ -16,12 +16,12 @@ from sqlalchemy import func, select
 
 from ..agents import challenges as challenge_rules
 from ..agents import themes as theme_rules
-from ..brain.platform import POWER_POOL_CLASS
+from ..brain.platform import POWER_POOL_CLASS, POWER_POOL_MAX_FIELDS, POWER_POOL_MAX_OPERATORS
 from ..db.models import QuotaReservation, QuotaSnapshot, utcnow
 from ..schemas import Out
 from ..vault.store import json_list
 from ..vault.yields import checks_of
-from .deps import State
+from .deps import State, refuse
 
 router = APIRouter(prefix="/api/competitions", tags=["competitions"])
 log = structlog.get_logger(__name__)
@@ -462,3 +462,261 @@ async def challenges(state: State) -> Challenges:
             )
         )
     return Challenges(challenges=tabs)
+
+
+# --- challenge candidates ------------------------------------------------------------------
+
+#: How many of the lowest-correlation candidates are measured against your pools.
+CANDIDATE_DEPTH = 40
+WHOLE_POOL = "all"
+POWER_POOL = "Power Pool"
+
+
+class PoolEffect(Out):
+    """A pool's Sharpe before and after the candidate joins it."""
+
+    members: int
+    before: float | None
+    after: float | None
+
+
+class ChallengeCandidate(Out):
+    alpha_id: str
+    region: str | None
+    universe: str | None
+    expression: str | None
+    sharpe: float | None
+    fitness: float | None
+    turnover: float | None
+    prod_correlation: float
+    #: Your ranking metric if this one is submitted next.
+    average_after: float
+    operators: int | None
+    fields: int | None
+    power_pool_correlation: float | None
+    #: Within Power Pool's limits: at most 8 operators and 3 fields, Power Pool correlation
+    #: under 0.5 where measured.
+    power_pool_ok: bool
+    #: Clears the regular Sharpe and Fitness limits, so no theme is needed.
+    regular: bool
+    #: Matches the month's Power Pool theme in its market (None where there is none).
+    theme_match: bool | None
+    whole: PoolEffect | None
+    power: PoolEffect | None
+    #: Lifts both your combined performance and your Power Pool performance.
+    improves: bool | None
+    #: Meets every condition: the challenge, Power Pool, and both pools improve.
+    qualifies: bool
+    #: BRAIN's full check not yet run on it.
+    pending: bool
+    reasons: list[str]
+
+
+class ChallengeCandidates(Out):
+    challenge_id: str
+    average_prod: float | None
+    candidates: list[ChallengeCandidate]
+
+
+def _sharpe_of(figures: dict[str, Any] | None) -> float | None:
+    value = (figures or {}).get("sharpe")
+    return float(value) if isinstance(value, int | float) else None
+
+
+def _effect(raw: dict[str, Any] | None) -> PoolEffect | None:
+    if not raw:
+        return None
+    return PoolEffect(
+        members=int(raw.get("members") or 0),
+        before=_sharpe_of(raw.get("before")),
+        after=_sharpe_of(raw.get("after")),
+    )
+
+
+def _lifts(effect: PoolEffect | None) -> bool | None:
+    if effect is None or effect.after is None:
+        return None
+    return effect.before is None or effect.after >= effect.before
+
+
+def assess(
+    *,
+    power_ok: bool,
+    regular: bool,
+    theme_match: bool | None,
+    whole: PoolEffect | None,
+    power: PoolEffect | None,
+) -> tuple[bool | None, list[str]]:
+    """Whether a candidate lifts both pools, and every reason it falls short of qualifying.
+
+    It qualifies within Power Pool's limits, as a regular Alpha or one matching the month's
+    theme (a pure Power Pool Alpha needs the theme), lifting combined and Power Pool Sharpe.
+    """
+    lifts = [_lifts(whole), _lifts(power)]
+    improves = None if None in lifts else all(lifts)
+    reasons: list[str] = []
+    if not power_ok:
+        reasons.append("OUTSIDE_POWER_POOL_LIMITS")
+    if not regular and not theme_match:
+        reasons.append("NEEDS_REGULAR_OR_THEME")
+    if improves is False:
+        reasons.append("LOWERS_A_POOL")
+    elif improves is None:
+        reasons.append("EFFECT_NOT_MEASURED")
+    return improves, reasons
+
+
+@router.get("/challenges/{challenge_id}/candidates")
+async def challenge_candidates(challenge_id: str, state: State) -> ChallengeCandidates:
+    """The submittable Alphas that best serve a challenge, Power Pool and both pools at once.
+
+    Of the submittable Alphas in the challenge's regions with a measured production
+    correlation under its ceiling, the lowest few are sized as Power Pool counts them, matched
+    against the month's theme, and measured against your combined and Power Pool pools.
+    Those meeting every condition come first, lowest production correlation first.
+    """
+    from ..agents import guard
+    from ..tools import portfolio
+    from .lab_tasks import submittable_alphas
+    from .template_lab import sizes
+
+    ch = next((c for c in challenge_rules.CHALLENGES if c.id == challenge_id), None)
+    if ch is None:
+        raise refuse(404, "no_challenge", f"No challenge called {challenge_id}.")
+    members = await state.alphas.submitted_members()
+    today = utcnow().astimezone(challenge_rules.PLATFORM_TZ).date()
+    submitted = [
+        challenge_rules.Submitted(
+            alpha_id=str(m["alpha_id"]),
+            region=m.get("region"),
+            day=challenge_rules.platform_day(m.get("date_submitted")),
+            prod_correlation=_prod_of(m),
+        )
+        for m in members
+    ]
+    standing = challenge_rules.standing(ch, submitted, {}, today)
+    counted = [
+        e.prod_correlation
+        for e in standing.entries
+        if e.eligible and e.prod_correlation is not None
+    ]
+
+    seen: set[str] = set()
+    picked = []
+    for a in await submittable_alphas(state):
+        region = str((a.settings or {}).get("region") or "")
+        if (
+            not a.alpha_id
+            or a.alpha_id in seen
+            or region not in ch.regions
+            or a.prod_correlation is None
+            or a.prod_correlation >= ch.max_prod
+        ):
+            continue
+        seen.add(a.alpha_id)
+        picked.append(a)
+    picked.sort(key=lambda a: a.prod_correlation or 1.0)
+    picked = picked[:CANDIDATE_DEPTH]
+    ids = [str(a.alpha_id) for a in picked]
+    stored = await state.alphas.by_ids(ids)
+
+    # Sized per market, as Power Pool counts them.
+    sized: dict[str, dict[str, Any]] = {}
+    by_market: dict[tuple[str, int], list[str]] = defaultdict(list)
+    for a in picked:
+        settings = a.settings or {}
+        by_market[(str(settings.get("region")), int(settings.get("delay") or 0))].append(
+            str(a.alpha_id)
+        )
+    for (region, delay), market_ids in by_market.items():
+        texts = [str((stored.get(i) or {}).get("expression") or "") for i in market_ids]
+        stats = await sizes(state, texts, region, delay)
+        sized.update(zip(market_ids, stats, strict=True))
+
+    source = getattr(state, "themes", None)
+    month = await source.current() if source is not None else []
+
+    scopes: dict[str, list[str]] = {
+        WHOLE_POOL: [str(m["alpha_id"]) for m in members],
+        POWER_POOL: [
+            str(m["alpha_id"])
+            for m in members
+            if POWER_POOL_CLASS in json_list(m.get("classifications"))
+        ],
+    }
+    joins = {i: [WHOLE_POOL, POWER_POOL] for i in ids}
+    series = await state.alphas.series([*scopes[WHOLE_POOL], *ids])
+    meta = await state.alphas.by_ids(scopes[WHOLE_POOL]) | stored
+    effects = await asyncio.to_thread(
+        portfolio.what_if, series, meta, scopes, joins, guard.RECENT_START
+    )
+
+    out: list[ChallengeCandidate] = []
+    for a in picked:
+        alpha_id = str(a.alpha_id)
+        row = stored.get(alpha_id) or {}
+        checks = checks_of(row.get("checks"))
+        by_name = {c.get("name"): c for c in checks}
+        ppc_check = by_name.get("POWER_POOL_CORRELATION") or {}
+        ppc = ppc_check.get("value")
+        ppc = float(ppc) if isinstance(ppc, int | float) else None
+        stat = sized.get(alpha_id) or {}
+        operators = (stat.get("operators") or [None])[-1]
+        fields = (stat.get("fields") or [None])[-1]
+        limits = a.limits or {}
+        regular = (a.sharpe or 0) >= float(limits.get("LOW_SHARPE", 99)) and (
+            a.fitness or 0
+        ) >= float(limits.get("LOW_FITNESS", 99))
+        theme = next(
+            (t for t in month if t.region == row.get("region") and t.delay == row.get("delay")),
+            None,
+        )
+        theme_match = (
+            theme.covers(row.get("region"), row.get("delay"), row.get("universe"), checks)
+            if theme is not None
+            else None
+        )
+        power_ok = (
+            operators is not None
+            and operators <= POWER_POOL_MAX_OPERATORS
+            and fields is not None
+            and fields <= POWER_POOL_MAX_FIELDS
+            and (ppc is None or ppc < 0.5)
+        )
+        whole = _effect(effects.get(alpha_id, {}).get(WHOLE_POOL))
+        power = _effect(effects.get(alpha_id, {}).get(POWER_POOL))
+        improves, reasons = assess(
+            power_ok=power_ok, regular=regular, theme_match=theme_match, whole=whole, power=power
+        )
+        prod = float(a.prod_correlation or 0.0)
+        out.append(
+            ChallengeCandidate(
+                alpha_id=alpha_id,
+                region=row.get("region"),
+                universe=row.get("universe"),
+                expression=row.get("expression"),
+                sharpe=a.sharpe,
+                fitness=a.fitness,
+                turnover=a.turnover,
+                prod_correlation=prod,
+                average_after=challenge_rules.average_after(counted, prod),
+                operators=operators,
+                fields=fields,
+                power_pool_correlation=ppc,
+                power_pool_ok=power_ok,
+                regular=regular,
+                theme_match=theme_match,
+                whole=whole,
+                power=power,
+                improves=improves,
+                qualifies=not reasons,
+                pending=bool(a.pending),
+                reasons=reasons,
+            )
+        )
+    out.sort(key=lambda c: (not c.qualifies, c.prod_correlation))
+    return ChallengeCandidates(
+        challenge_id=ch.id,
+        average_prod=standing.average_prod,
+        candidates=out,
+    )
