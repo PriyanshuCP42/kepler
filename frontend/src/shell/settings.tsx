@@ -240,11 +240,52 @@ function SimulationRows({ current, change }: Rows) {
               : 'Reading what the computer allows…'}
         </Status>
       </SettingRow>
+      <SettingRow
+        title="Daily Autopilot"
+        description="Keeps the day's research running without you: starts tasks that were added but never run until the day's target is spent, asks BRAIN to check the strongest of Today's Picks, and warns when a daily rule is at risk. It never submits; Today's Picks lists what is ready for you to submit."
+        control={(labels) => (
+          <Switch
+            checked={current.autopilot}
+            onChange={(on) => change({ autopilot: on })}
+            {...labels}
+          />
+        )}
+      >
+        {current.autopilot && (
+          <Segmented
+            label="Simulations to spend each day"
+            items={AUTOPILOT_TARGETS}
+            value={current.autopilotDailyTarget}
+            onChange={(target) => change({ autopilotDailyTarget: target })}
+          />
+        )}
+        <Status>
+          {current.autopilot
+            ? `On: aims for ${fmt.int(current.autopilotDailyTarget)} simulations a day.`
+            : 'Off: tasks start only when you run them. Alerts still work.'}
+        </Status>
+      </SettingRow>
+      <SettingRow
+        title="Desktop alerts"
+        description="A notification when Kepler is signed out of BRAIN, when fewer than 1,000 simulations have run late in the BRAIN day, or when nothing has been submitted with four hours left. At most one of each kind an hour."
+        control={(labels) => (
+          <Switch
+            checked={current.desktopAlerts}
+            onChange={(on) => change({ desktopAlerts: on })}
+            {...labels}
+          />
+        )}
+      />
     </>
   )
 }
 
 // ── Tasks ────────────────────────────────────────────────────────────────────────────────
+
+const AUTOPILOT_TARGETS = [2000, 3000, 4500, 5000].map((n) => ({
+  value: n,
+  label: fmt.int(n),
+}))
 
 const CORES = Array.from({ length: SIMULATION_SLOTS }, (_, i) => ({
   value: i + 1,

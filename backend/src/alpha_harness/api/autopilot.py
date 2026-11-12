@@ -185,3 +185,146 @@ async def lab_yields(state: Any) -> list[LabYield]:
         for (lab, objective), g in groups.items()
     ]
     return sorted(out, key=lambda y: y.per_thousand, reverse=True)
+
+
+# --- Today's Picks -------------------------------------------------------------------------
+
+
+class Pick(Out):
+    """One submittable Alpha as the Submit Gate judged it."""
+
+    alpha_id: str
+    region: str | None
+    delay: int | None
+    universe: str | None
+    sharpe: float | None
+    fitness: float | None
+    returns: float | None
+    drawdown: float | None
+    return_to_drawdown: float | None
+    margin: float | None
+    turnover: float | None
+    test_sharpe: float | None
+    prod_correlation: float | None
+    self_correlation: float | None
+    power_pool_correlation: float | None
+    operators: int | None
+    fields: int | None
+    power_pool: bool
+    regular: bool
+    theme_match: bool | None
+    #: Change in combined and in Power Pool Sharpe if it joins.
+    whole_delta: float | None
+    power_delta: float | None
+    #: The recent submission whose dataset it repeats in the same market.
+    lookalike_of: str | None
+    datasets: list[str]
+    #: READY, CHECK, REPAIR or REJECT.
+    verdict: str
+    reasons: list[str]
+    score: float
+
+
+class Picks(Out):
+    measured: int
+    ready: list[Pick]
+    check: list[Pick]
+    repair: list[Pick]
+    rejected: int
+    #: Why candidates were rejected, most common first.
+    rejected_by: dict[str, int]
+
+
+def to_pick(m: Any) -> Pick:
+    row, j = m.row, m.judgement
+    settings = row.settings or {}
+    return Pick(
+        alpha_id=str(row.alpha_id),
+        region=settings.get("region"),
+        delay=settings.get("delay"),
+        universe=settings.get("universe"),
+        sharpe=row.sharpe,
+        fitness=row.fitness,
+        returns=row.returns,
+        drawdown=row.drawdown,
+        return_to_drawdown=j.return_to_drawdown,
+        margin=row.margin,
+        turnover=row.turnover,
+        test_sharpe=row.test_sharpe,
+        prod_correlation=m.facts.prod_correlation,
+        self_correlation=m.facts.self_correlation,
+        power_pool_correlation=m.power_pool_correlation,
+        operators=m.operators,
+        fields=m.fields,
+        power_pool=j.power_pool,
+        regular=j.regular,
+        theme_match=m.theme_match,
+        whole_delta=m.whole_delta,
+        power_delta=m.power_delta,
+        lookalike_of=m.lookalike_of,
+        datasets=sorted(m.datasets),
+        verdict=str(j.verdict),
+        reasons=j.reasons,
+        score=j.score,
+    )
+
+
+async def todays_picks(state: Any) -> Picks:
+    """The submittable Alphas the Submit Gate would submit, check or repair, best first."""
+    from ..agents import picks
+    from ..agents.gate import Verdict
+    from .lab_tasks import submittable_alphas
+
+    measured = await picks.measure(state, picks.shortlist(await submittable_alphas(state)))
+    grouped: dict[Verdict, list[Pick]] = defaultdict(list)
+    rejected_by: dict[str, int] = defaultdict(int)
+    for m in measured:
+        grouped[m.judgement.verdict].append(to_pick(m))
+        if m.judgement.verdict is Verdict.REJECT and m.judgement.reasons:
+            rejected_by[m.judgement.reasons[0]] += 1
+    for found in grouped.values():
+        found.sort(key=lambda p: -p.score)
+    return Picks(
+        measured=len(measured),
+        ready=grouped[Verdict.READY],
+        check=grouped[Verdict.CHECK],
+        repair=grouped[Verdict.REPAIR],
+        rejected=len(grouped[Verdict.REJECT]),
+        rejected_by=dict(sorted(rejected_by.items(), key=lambda kv: -kv[1])),
+    )
+
+
+@router.get("/picks")
+async def picks_today(state: State) -> Picks:
+    """Today's Picks: submittable Alphas the Submit Gate calls Ready, ones to check with BRAIN
+    first, and near misses to repair. Kepler never submits; you do."""
+    return await todays_picks(state)
+
+
+class AutopilotAlert(Out):
+    kind: str
+    title: str
+    text: str
+
+
+class AutopilotStatus(Out):
+    enabled: bool
+    daily_target: int
+    #: The last round: when, the day's figures, what it did and why.
+    last: dict[str, Any]
+    alerts: list[AutopilotAlert]
+
+
+@router.get("/status")
+async def autopilot_status(state: State) -> AutopilotStatus:
+    """What the Daily Autopilot last did, and the alerts it raised most recently."""
+    pilot = state.autopilot
+    return AutopilotStatus(
+        enabled=pilot.enabled,
+        daily_target=pilot.daily_target,
+        last=pilot.last,
+        alerts=[
+            AutopilotAlert(kind=k, title=t, text=x)
+            for k, t, x in reversed(pilot.alerts.raised[-10:])
+        ],
+    )

@@ -468,7 +468,6 @@ async def challenges(state: State) -> Challenges:
 
 #: How many of the lowest-correlation candidates are measured against your pools.
 CANDIDATE_DEPTH = 40
-WHOLE_POOL = "all"
 #: Margin a candidate must clear: 5 bps, the trading cost After-Cost Mode charges. Below it
 #: the Alpha loses money net of costs and dilutes the combined PnL BRAIN shows.
 MIN_MARGIN = 0.0005
@@ -477,7 +476,6 @@ MIN_MARGIN = 0.0005
 MIN_RETURN_TO_DRAWDOWN = 1.5
 #: Where a candidate's returns-to-drawdown counts as strong, as the challenge tab marks it.
 STRONG_RETURN_TO_DRAWDOWN = 2.0
-POWER_POOL = "Power Pool"
 
 
 class PoolEffect(Out):
@@ -531,21 +529,6 @@ class ChallengeCandidates(Out):
     challenge_id: str
     average_prod: float | None
     candidates: list[ChallengeCandidate]
-
-
-def _sharpe_of(figures: dict[str, Any] | None) -> float | None:
-    value = (figures or {}).get("sharpe")
-    return float(value) if isinstance(value, int | float) else None
-
-
-def _effect(raw: dict[str, Any] | None) -> PoolEffect | None:
-    if not raw:
-        return None
-    return PoolEffect(
-        members=int(raw.get("members") or 0),
-        before=_sharpe_of(raw.get("before")),
-        after=_sharpe_of(raw.get("after")),
-    )
 
 
 def _lifts(effect: PoolEffect | None) -> bool | None:
@@ -608,10 +591,8 @@ async def challenge_candidates(challenge_id: str, state: State) -> ChallengeCand
     against the month's theme, and measured against your combined and Power Pool pools.
     Those meeting every condition come first, lowest production correlation first.
     """
-    from ..agents import guard
-    from ..tools import portfolio
+    from ..agents import picks
     from .lab_tasks import submittable_alphas
-    from .template_lab import sizes
 
     ch = next((c for c in challenge_rules.CHALLENGES if c.id == challenge_id), None)
     if ch is None:
@@ -650,78 +631,35 @@ async def challenge_candidates(challenge_id: str, state: State) -> ChallengeCand
         picked.append(a)
     picked.sort(key=lambda a: a.prod_correlation or 1.0)
     picked = picked[:CANDIDATE_DEPTH]
-    ids = [str(a.alpha_id) for a in picked]
-    stored = await state.alphas.by_ids(ids)
-
-    # Sized per market, as Power Pool counts them.
-    sized: dict[str, dict[str, Any]] = {}
-    by_market: dict[tuple[str, int], list[str]] = defaultdict(list)
-    for a in picked:
-        settings = a.settings or {}
-        by_market[(str(settings.get("region")), int(settings.get("delay") or 0))].append(
-            str(a.alpha_id)
-        )
-    for (region, delay), market_ids in by_market.items():
-        texts = [str((stored.get(i) or {}).get("expression") or "") for i in market_ids]
-        stats = await sizes(state, texts, region, delay)
-        sized.update(zip(market_ids, stats, strict=True))
-
-    source = getattr(state, "themes", None)
-    month = await source.current() if source is not None else []
-
-    scopes: dict[str, list[str]] = {
-        WHOLE_POOL: [str(m["alpha_id"]) for m in members],
-        POWER_POOL: [
-            str(m["alpha_id"])
-            for m in members
-            if POWER_POOL_CLASS in json_list(m.get("classifications"))
-        ],
-    }
-    joins = {i: [WHOLE_POOL, POWER_POOL] for i in ids}
-    series = await state.alphas.series([*scopes[WHOLE_POOL], *ids])
-    meta = await state.alphas.by_ids(scopes[WHOLE_POOL]) | stored
-    effects = await asyncio.to_thread(
-        portfolio.what_if, series, meta, scopes, joins, guard.RECENT_START
-    )
-
     out: list[ChallengeCandidate] = []
-    for a in picked:
-        alpha_id = str(a.alpha_id)
-        row = stored.get(alpha_id) or {}
-        checks = checks_of(row.get("checks"))
-        by_name = {c.get("name"): c for c in checks}
-        ppc_check = by_name.get("POWER_POOL_CORRELATION") or {}
-        ppc = ppc_check.get("value")
-        ppc = float(ppc) if isinstance(ppc, int | float) else None
-        stat = sized.get(alpha_id) or {}
-        operators = (stat.get("operators") or [None])[-1]
-        fields = (stat.get("fields") or [None])[-1]
+    for m in await picks.measure(state, picked):
+        a, row = m.row, m.stored
         limits = a.limits or {}
         regular = (a.sharpe or 0) >= float(limits.get("LOW_SHARPE", 99)) and (
             a.fitness or 0
         ) >= float(limits.get("LOW_FITNESS", 99))
-        theme = next(
-            (t for t in month if t.region == row.get("region") and t.delay == row.get("delay")),
-            None,
-        )
-        theme_match = (
-            theme.covers(row.get("region"), row.get("delay"), row.get("universe"), checks)
-            if theme is not None
-            else None
-        )
+        ppc = m.power_pool_correlation
         power_ok = (
-            operators is not None
-            and operators <= POWER_POOL_MAX_OPERATORS
-            and fields is not None
-            and fields <= POWER_POOL_MAX_FIELDS
+            m.operators is not None
+            and m.operators <= POWER_POOL_MAX_OPERATORS
+            and m.fields is not None
+            and m.fields <= POWER_POOL_MAX_FIELDS
             and (ppc is None or ppc < 0.5)
         )
-        whole = _effect(effects.get(alpha_id, {}).get(WHOLE_POOL))
-        power = _effect(effects.get(alpha_id, {}).get(POWER_POOL))
+        whole = (
+            PoolEffect(members=0, before=m.whole_before, after=m.whole_before + m.whole_delta)
+            if m.whole_delta is not None and m.whole_before is not None
+            else None
+        )
+        power = (
+            PoolEffect(members=0, before=m.power_before, after=m.power_before + m.power_delta)
+            if m.power_delta is not None and m.power_before is not None
+            else None
+        )
         improves, reasons = assess(
             power_ok=power_ok,
             regular=regular,
-            theme_match=theme_match,
+            theme_match=m.theme_match,
             whole=whole,
             power=power,
             margin=a.margin,
@@ -731,7 +669,7 @@ async def challenge_candidates(challenge_id: str, state: State) -> ChallengeCand
         prod = float(a.prod_correlation or 0.0)
         out.append(
             ChallengeCandidate(
-                alpha_id=alpha_id,
+                alpha_id=str(a.alpha_id),
                 region=row.get("region"),
                 universe=row.get("universe"),
                 expression=row.get("expression"),
@@ -744,12 +682,12 @@ async def challenge_candidates(challenge_id: str, state: State) -> ChallengeCand
                 return_to_drawdown=return_to_drawdown(a.returns, a.drawdown),
                 prod_correlation=prod,
                 average_after=challenge_rules.average_after(counted, prod),
-                operators=operators,
-                fields=fields,
+                operators=m.operators,
+                fields=m.fields,
                 power_pool_correlation=ppc,
                 power_pool_ok=power_ok,
                 regular=regular,
-                theme_match=theme_match,
+                theme_match=m.theme_match,
                 whole=whole,
                 power=power,
                 improves=improves,

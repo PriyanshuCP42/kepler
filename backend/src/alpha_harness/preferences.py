@@ -46,6 +46,15 @@ class Preferences(Out):
     #: The model that writes Power Pool descriptions, as ``provider:model``; unset, the set-up
     #: model with the largest daily allowance.
     description_model: str | None = None
+    #: The Daily Autopilot: start waiting tasks until the day's simulation target is spent,
+    #: ask BRAIN to check the strongest picks, and warn when a daily rule is at risk. It never
+    #: submits. Off until switched on, since it spends quota by itself.
+    autopilot: bool = False
+    #: Simulations the Autopilot aims to spend each BRAIN day.
+    autopilot_daily_target: int = Field(default=4500, ge=1000, le=5000)
+    #: Desktop notifications when the session signs out, the day's simulations fall behind,
+    #: or nothing is submitted late in the day.
+    desktop_alerts: bool = True
 
 
 async def load(db: Database) -> Preferences:
@@ -72,3 +81,8 @@ def apply(state: AppState, preferences: Preferences) -> None:
     )
     updates.check_hours = preferences.update_check_hours
     updates.auto_install = preferences.auto_update
+    autopilot = getattr(state, "autopilot", None)
+    if autopilot is not None:
+        autopilot.enabled = preferences.autopilot
+        autopilot.daily_target = preferences.autopilot_daily_target
+        autopilot.alerts.enabled = preferences.desktop_alerts

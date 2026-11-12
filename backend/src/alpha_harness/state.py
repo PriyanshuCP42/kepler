@@ -16,6 +16,7 @@ from sqlalchemy import select
 from . import preferences, updates
 from .account import AuthService, PlatformMetadata
 from .agents.allocator import Allocator
+from .agents.autopilot import DailyAutopilot
 from .agents.bus import AgentBus
 from .agents.conductor import Conductor
 from .agents.critic import Critic
@@ -178,6 +179,7 @@ class AppState:
         self.conductor = Conductor(self, self.agents, requeue)
         self.repair = RepairEngineer(self, self.agents)
         self.strategist = Strategist(self, self.agents)
+        self.autopilot = DailyAutopilot(self, self.agents)
         self.guard = Guard(self, self.agents)
         self.hypotheses = HypothesisWriter(self, self.agents)
         self.allocator = Allocator(self, self.agents)
@@ -252,6 +254,7 @@ class AppState:
         await self.allocator.start()
         await self.repair.start()
         await self.conductor.start()
+        await self.autopilot.start()
         await self.prod_watch.start()
         self._session_watch = asyncio.create_task(self._watch_session(), name="session-watch")
         log.info("startup.complete", data_dir=str(self.settings.data_dir))
@@ -394,6 +397,7 @@ class AppState:
             with contextlib.suppress(asyncio.CancelledError):
                 await watch
         await self.conductor.stop()
+        await self.autopilot.stop()
         await self.prod_watch.stop()
         await self.families.stop()
         await self.screener.stop()

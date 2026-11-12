@@ -499,6 +499,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/autopilot/picks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Picks Today
+         * @description Today's Picks: submittable Alphas the Submit Gate calls Ready, ones to check with BRAIN
+         *     first, and near misses to repair. Kepler never submits; you do.
+         */
+        get: operations["picks_today_api_autopilot_picks_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/autopilot/prescreen/train": {
         parameters: {
             query?: never;
@@ -513,6 +534,26 @@ export interface paths {
          * @description Retrain the Pre-screen on the vault now. Runs in the background; costs no quota.
          */
         post: operations["train_api_autopilot_prescreen_train_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/autopilot/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Autopilot Status
+         * @description What the Daily Autopilot last did, and the alerts it raised most recently.
+         */
+        get: operations["autopilot_status_api_autopilot_status_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3362,6 +3403,28 @@ export interface components {
             /** Yields */
             yields: components["schemas"]["LabYield"][];
         };
+        /** AutopilotAlert */
+        AutopilotAlert: {
+            /** Kind */
+            kind: string;
+            /** Text */
+            text: string;
+            /** Title */
+            title: string;
+        };
+        /** AutopilotStatus */
+        AutopilotStatus: {
+            /** Alerts */
+            alerts: components["schemas"]["AutopilotAlert"][];
+            /** Dailytarget */
+            dailyTarget: number;
+            /** Enabled */
+            enabled: boolean;
+            /** Last */
+            last: {
+                [key: string]: unknown;
+            };
+        };
         /**
          * AvailabilityCounts
          * @description Fields each availability toggle would show if pressed, under the other filters.
@@ -5527,6 +5590,83 @@ export interface components {
             test: components["schemas"]["Period"] | null;
             train: components["schemas"]["Period"] | null;
         };
+        /**
+         * Pick
+         * @description One submittable Alpha as the Submit Gate judged it.
+         */
+        Pick: {
+            /** Alphaid */
+            alphaId: string;
+            /** Datasets */
+            datasets: string[];
+            /** Delay */
+            delay: number | null;
+            /** Drawdown */
+            drawdown: number | null;
+            /** Fields */
+            fields: number | null;
+            /** Fitness */
+            fitness: number | null;
+            /** Lookalikeof */
+            lookalikeOf: string | null;
+            /** Margin */
+            margin: number | null;
+            /** Operators */
+            operators: number | null;
+            /** Powerdelta */
+            powerDelta: number | null;
+            /** Powerpool */
+            powerPool: boolean;
+            /** Powerpoolcorrelation */
+            powerPoolCorrelation: number | null;
+            /** Prodcorrelation */
+            prodCorrelation: number | null;
+            /** Reasons */
+            reasons: string[];
+            /** Region */
+            region: string | null;
+            /** Regular */
+            regular: boolean;
+            /** Returntodrawdown */
+            returnToDrawdown: number | null;
+            /** Returns */
+            returns: number | null;
+            /** Score */
+            score: number;
+            /** Selfcorrelation */
+            selfCorrelation: number | null;
+            /** Sharpe */
+            sharpe: number | null;
+            /** Testsharpe */
+            testSharpe: number | null;
+            /** Themematch */
+            themeMatch: boolean | null;
+            /** Turnover */
+            turnover: number | null;
+            /** Universe */
+            universe: string | null;
+            /** Verdict */
+            verdict: string;
+            /** Wholedelta */
+            wholeDelta: number | null;
+        };
+        /** Picks */
+        Picks: {
+            /** Check */
+            check: components["schemas"]["Pick"][];
+            /** Measured */
+            measured: number;
+            /** Ready */
+            ready: components["schemas"]["Pick"][];
+            /** Rejected */
+            rejected: number;
+            /** Rejectedby */
+            rejectedBy: {
+                [key: string]: number;
+            };
+            /** Repair */
+            repair: components["schemas"]["Pick"][];
+        };
         /** PlanRequest */
         PlanRequest: {
             /**
@@ -5956,12 +6096,27 @@ export interface components {
              */
             autoUpdate: boolean;
             /**
+             * Autopilot
+             * @default false
+             */
+            autopilot: boolean;
+            /**
+             * Autopilotdailytarget
+             * @default 4500
+             */
+            autopilotDailyTarget: number;
+            /**
              * Defaultcores
              * @default 4
              */
             defaultCores: number;
             /** Descriptionmodel */
             descriptionModel?: string | null;
+            /**
+             * Desktopalerts
+             * @default true
+             */
+            desktopAlerts: boolean;
             /**
              * Keepawake
              * @default true
@@ -8405,6 +8560,26 @@ export interface operations {
             };
         };
     };
+    picks_today_api_autopilot_picks_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Picks"];
+                };
+            };
+        };
+    };
     train_api_autopilot_prescreen_train_post: {
         parameters: {
             query?: never;
@@ -8421,6 +8596,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Started"];
+                };
+            };
+        };
+    };
+    autopilot_status_api_autopilot_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutopilotStatus"];
                 };
             };
         };
