@@ -472,6 +472,11 @@ WHOLE_POOL = "all"
 #: Margin a candidate must clear: 5 bps, the trading cost After-Cost Mode charges. Below it
 #: the Alpha loses money net of costs and dilutes the combined PnL BRAIN shows.
 MIN_MARGIN = 0.0005
+#: Annual returns a candidate must earn per unit of its worst drawdown. Below it the Alpha
+#: gives back too much on its bad stretches to raise your combined performance.
+MIN_RETURN_TO_DRAWDOWN = 1.5
+#: Where a candidate's returns-to-drawdown counts as strong, as the challenge tab marks it.
+STRONG_RETURN_TO_DRAWDOWN = 2.0
 POWER_POOL = "Power Pool"
 
 
@@ -493,6 +498,11 @@ class ChallengeCandidate(Out):
     turnover: float | None
     #: Returns per unit traded; under :data:`MIN_MARGIN` it loses money after costs.
     margin: float | None
+    returns: float | None
+    drawdown: float | None
+    #: Annual returns over the worst drawdown; under :data:`MIN_RETURN_TO_DRAWDOWN` it does
+    #: not qualify.
+    return_to_drawdown: float | None
     prod_correlation: float
     #: Your ranking metric if this one is submitted next.
     average_after: float
@@ -544,6 +554,13 @@ def _lifts(effect: PoolEffect | None) -> bool | None:
     return effect.before is None or effect.after >= effect.before
 
 
+def return_to_drawdown(returns: float | None, drawdown: float | None) -> float | None:
+    """Annual returns per unit of the worst drawdown; None when either is unknown."""
+    if returns is None or drawdown is None or drawdown <= 0:
+        return None
+    return returns / drawdown
+
+
 def assess(
     *,
     power_ok: bool,
@@ -552,13 +569,16 @@ def assess(
     whole: PoolEffect | None,
     power: PoolEffect | None,
     margin: float | None = None,
+    returns: float | None = None,
+    drawdown: float | None = None,
 ) -> tuple[bool | None, list[str]]:
     """Whether a candidate lifts both pools, and every reason it falls short of qualifying.
 
     It qualifies within Power Pool's limits, as a regular Alpha or one matching the month's
     theme (a pure Power Pool Alpha needs the theme), lifting combined and Power Pool Sharpe,
-    and earning more per trade than trading costs (:data:`MIN_MARGIN`): one under it loses
-    money once costs are paid, however good its gross figures.
+    earning more per trade than trading costs (:data:`MIN_MARGIN`), since one under it loses
+    money once costs are paid, and earning at least :data:`MIN_RETURN_TO_DRAWDOWN` times its
+    worst drawdown each year, since one that gives back more drags your performance down.
     """
     lifts = [_lifts(whole), _lifts(power)]
     improves = None if None in lifts else all(lifts)
@@ -569,6 +589,9 @@ def assess(
         reasons.append("NEEDS_REGULAR_OR_THEME")
     if margin is not None and margin < MIN_MARGIN:
         reasons.append("MARGIN_UNDER_COSTS")
+    ratio = return_to_drawdown(returns, drawdown)
+    if ratio is not None and ratio < MIN_RETURN_TO_DRAWDOWN:
+        reasons.append("RETURN_TO_DRAWDOWN_TOO_LOW")
     if improves is False:
         reasons.append("LOWERS_A_POOL")
     elif improves is None:
@@ -702,6 +725,8 @@ async def challenge_candidates(challenge_id: str, state: State) -> ChallengeCand
             whole=whole,
             power=power,
             margin=a.margin,
+            returns=a.returns,
+            drawdown=a.drawdown,
         )
         prod = float(a.prod_correlation or 0.0)
         out.append(
@@ -714,6 +739,9 @@ async def challenge_candidates(challenge_id: str, state: State) -> ChallengeCand
                 fitness=a.fitness,
                 turnover=a.turnover,
                 margin=a.margin,
+                returns=a.returns,
+                drawdown=a.drawdown,
+                return_to_drawdown=return_to_drawdown(a.returns, a.drawdown),
                 prod_correlation=prod,
                 average_after=challenge_rules.average_after(counted, prod),
                 operators=operators,

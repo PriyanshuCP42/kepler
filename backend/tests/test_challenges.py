@@ -97,3 +97,23 @@ def test_a_candidate_losing_money_after_costs_never_qualifies():
     assert assess(**ok, margin=0.00045)[1] == ["MARGIN_UNDER_COSTS"]
     assert assess(**ok, margin=MIN_MARGIN)[1] == []
     assert assess(**ok, margin=None)[1] == []  # unknown margin is not a refusal
+
+
+def test_a_candidate_must_earn_its_drawdown_back_quickly():
+    from alpha_harness.api.competitions import (
+        MIN_RETURN_TO_DRAWDOWN,
+        PoolEffect,
+        assess,
+        return_to_drawdown,
+    )
+
+    up = PoolEffect(members=10, before=7.0, after=7.1)
+    ok = {"power_ok": True, "regular": True, "theme_match": None, "whole": up, "power": up}
+    # 5% a year against a 5% drawdown: gives back a whole year on one bad stretch.
+    assert assess(**ok, returns=0.05, drawdown=0.05)[1] == ["RETURN_TO_DRAWDOWN_TOO_LOW"]
+    assert assess(**ok, returns=0.06, drawdown=0.04)[1] == []  # 1.5, the floor
+    assert assess(**ok, returns=0.08, drawdown=0.02)[1] == []
+    # Unknown figures are not a refusal; a zero drawdown has no ratio.
+    assert assess(**ok, returns=None, drawdown=0.05)[1] == []
+    assert return_to_drawdown(0.05, 0.0) is None
+    assert return_to_drawdown(0.06, 0.04) == MIN_RETURN_TO_DRAWDOWN

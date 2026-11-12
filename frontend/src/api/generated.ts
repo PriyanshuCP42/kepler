@@ -3652,6 +3652,8 @@ export interface components {
             alphaId: string;
             /** Averageafter */
             averageAfter: number;
+            /** Drawdown */
+            drawdown: number | null;
             /** Expression */
             expression: string | null;
             /** Fields */
@@ -3681,6 +3683,10 @@ export interface components {
             region: string | null;
             /** Regular */
             regular: boolean;
+            /** Returntodrawdown */
+            returnToDrawdown: number | null;
+            /** Returns */
+            returns: number | null;
             /** Sharpe */
             sharpe: number | null;
             /** Themematch */

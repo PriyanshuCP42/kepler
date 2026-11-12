@@ -20,6 +20,7 @@ const REASON: Record<string, string> = {
   LOWERS_A_POOL: 'lowers a pool',
   EFFECT_NOT_MEASURED: 'effect not measured',
   MARGIN_UNDER_COSTS: 'loses money after 5 bps costs',
+  RETURN_TO_DRAWDOWN_TOO_LOW: 'returns under 1.5× its drawdown',
 }
 
 /** A pool's Sharpe change, signed, or a dash when it was not measured. */
@@ -44,7 +45,7 @@ function Candidates({ challenge: c }: { challenge: ChallengeTab }) {
   return (
     <Panel
       title="Best Candidates"
-      description={`Submittable ${c.rules.regions.join('/')} Alphas under ${fmt.ratio(c.rules.maxProd, 1)} production correlation. They qualify within Power Pool's limits, as regular Alphas or ones matching the month's theme, raising both your combined and your Power Pool Sharpe, with a margin above the 5 bps trading cost. Qualifying ones come first, lowest production correlation first. Check each is not a lookalike of a recent submission.`}
+      description={`Submittable ${c.rules.regions.join('/')} Alphas under ${fmt.ratio(c.rules.maxProd, 1)} production correlation. They qualify within Power Pool's limits, as regular Alphas or ones matching the month's theme, raising both your combined and your Power Pool Sharpe, with a margin above the 5 bps trading cost and annual returns at least 1.5 times the worst drawdown (2 or more is strong). Qualifying ones come first, lowest production correlation first. Check each is not a lookalike of a recent submission.`}
       actions={
         query.data && (
           <Badge tone={qualifying ? 'profit' : 'warn'}>{fmt.int(qualifying)} qualify</Badge>
@@ -70,6 +71,7 @@ function Candidates({ challenge: c }: { challenge: ChallengeTab }) {
                 <th className="py-1.5 pr-3 text-right font-medium">Prod Corr</th>
                 <th className="py-1.5 pr-3 text-right font-medium">Average After</th>
                 <th className="py-1.5 pr-3 text-right font-medium">Margin</th>
+                <th className="py-1.5 pr-3 text-right font-medium">Return / Drawdown</th>
                 <th className="py-1.5 pr-3 text-right font-medium">Ops / Fields</th>
                 <th className="py-1.5 pr-3 text-right font-medium">PP Corr</th>
                 <th className="py-1.5 pr-3 text-right font-medium">Combined Sharpe</th>
@@ -95,6 +97,19 @@ function Candidates({ challenge: c }: { challenge: ChallengeTab }) {
                     className={`num py-1.5 pr-3 text-right ${a.margin != null && a.margin < 0.0005 ? 'text-pnl-negative-text' : ''}`}
                   >
                     {a.margin == null ? '—' : `${fmt.ratio(a.margin * 10_000, 1)} bps`}
+                  </td>
+                  <td
+                    className={`num py-1.5 pr-3 text-right ${
+                      a.returnToDrawdown == null
+                        ? ''
+                        : a.returnToDrawdown >= 2
+                          ? 'text-pnl-positive-text'
+                          : a.returnToDrawdown < 1.5
+                            ? 'text-pnl-negative-text'
+                            : ''
+                    }`}
+                  >
+                    {fmt.ratio(a.returnToDrawdown)}
                   </td>
                   <td className="num py-1.5 pr-3 text-right">
                     {fmt.int(a.operators)} / {fmt.int(a.fields)}
