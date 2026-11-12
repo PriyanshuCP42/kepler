@@ -469,6 +469,9 @@ async def challenges(state: State) -> Challenges:
 #: How many of the lowest-correlation candidates are measured against your pools.
 CANDIDATE_DEPTH = 40
 WHOLE_POOL = "all"
+#: Margin a candidate must clear: 5 bps, the trading cost After-Cost Mode charges. Below it
+#: the Alpha loses money net of costs and dilutes the combined PnL BRAIN shows.
+MIN_MARGIN = 0.0005
 POWER_POOL = "Power Pool"
 
 
@@ -488,6 +491,8 @@ class ChallengeCandidate(Out):
     sharpe: float | None
     fitness: float | None
     turnover: float | None
+    #: Returns per unit traded; under :data:`MIN_MARGIN` it loses money after costs.
+    margin: float | None
     prod_correlation: float
     #: Your ranking metric if this one is submitted next.
     average_after: float
@@ -546,11 +551,14 @@ def assess(
     theme_match: bool | None,
     whole: PoolEffect | None,
     power: PoolEffect | None,
+    margin: float | None = None,
 ) -> tuple[bool | None, list[str]]:
     """Whether a candidate lifts both pools, and every reason it falls short of qualifying.
 
     It qualifies within Power Pool's limits, as a regular Alpha or one matching the month's
-    theme (a pure Power Pool Alpha needs the theme), lifting combined and Power Pool Sharpe.
+    theme (a pure Power Pool Alpha needs the theme), lifting combined and Power Pool Sharpe,
+    and earning more per trade than trading costs (:data:`MIN_MARGIN`): one under it loses
+    money once costs are paid, however good its gross figures.
     """
     lifts = [_lifts(whole), _lifts(power)]
     improves = None if None in lifts else all(lifts)
@@ -559,6 +567,8 @@ def assess(
         reasons.append("OUTSIDE_POWER_POOL_LIMITS")
     if not regular and not theme_match:
         reasons.append("NEEDS_REGULAR_OR_THEME")
+    if margin is not None and margin < MIN_MARGIN:
+        reasons.append("MARGIN_UNDER_COSTS")
     if improves is False:
         reasons.append("LOWERS_A_POOL")
     elif improves is None:
@@ -686,7 +696,12 @@ async def challenge_candidates(challenge_id: str, state: State) -> ChallengeCand
         whole = _effect(effects.get(alpha_id, {}).get(WHOLE_POOL))
         power = _effect(effects.get(alpha_id, {}).get(POWER_POOL))
         improves, reasons = assess(
-            power_ok=power_ok, regular=regular, theme_match=theme_match, whole=whole, power=power
+            power_ok=power_ok,
+            regular=regular,
+            theme_match=theme_match,
+            whole=whole,
+            power=power,
+            margin=a.margin,
         )
         prod = float(a.prod_correlation or 0.0)
         out.append(
@@ -698,6 +713,7 @@ async def challenge_candidates(challenge_id: str, state: State) -> ChallengeCand
                 sharpe=a.sharpe,
                 fitness=a.fitness,
                 turnover=a.turnover,
+                margin=a.margin,
                 prod_correlation=prod,
                 average_after=challenge_rules.average_after(counted, prod),
                 operators=operators,

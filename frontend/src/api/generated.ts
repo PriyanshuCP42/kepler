@@ -3660,6 +3660,8 @@ export interface components {
             fitness: number | null;
             /** Improves */
             improves: boolean | null;
+            /** Margin */
+            margin: number | null;
             /** Operators */
             operators: number | null;
             /** Pending */

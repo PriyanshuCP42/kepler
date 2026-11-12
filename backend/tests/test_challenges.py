@@ -86,3 +86,14 @@ def test_a_candidate_qualifies_only_within_power_pool_limits_and_lifting_both_po
     big = {**ok, "power_ok": False}
     assert assess(**big, whole=up, power=up)[1] == ["OUTSIDE_POWER_POOL_LIMITS"]
     assert assess(**ok, whole=None, power=up) == (None, ["EFFECT_NOT_MEASURED"])
+
+
+def test_a_candidate_losing_money_after_costs_never_qualifies():
+    from alpha_harness.api.competitions import MIN_MARGIN, PoolEffect, assess
+
+    up = PoolEffect(members=10, before=7.0, after=7.1)
+    ok = {"power_ok": True, "regular": True, "theme_match": None, "whole": up, "power": up}
+    # 4.5 bps gross: negative once 5 bps of costs are paid.
+    assert assess(**ok, margin=0.00045)[1] == ["MARGIN_UNDER_COSTS"]
+    assert assess(**ok, margin=MIN_MARGIN)[1] == []
+    assert assess(**ok, margin=None)[1] == []  # unknown margin is not a refusal
