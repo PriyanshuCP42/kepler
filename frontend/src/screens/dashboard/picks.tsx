@@ -18,6 +18,7 @@ type AutopilotStatus = components['schemas']['AutopilotStatus']
 const REASON: Record<string, string> = {
   REVERSION_COMPONENT: 'reversion component',
   PROD_CORRELATION: 'production correlation ≥ 0.7',
+  PROD_TWIN: 'its PnL twin failed production correlation',
   SELF_CORRELATION: 'self correlation ≥ 0.7',
   LOOKALIKE: 'repeats a recent submission',
   LOWERS_COMBINED: 'lowers combined Sharpe',

@@ -13,8 +13,8 @@ Four verdicts:
   Run BRAIN's check, then judge again.
 - ``REPAIR``: fails only narrowly (Fitness, margin, returns per drawdown, Sharpe, or how much of
   the train Sharpe the test years keep). The Repair Engineer's work, not the bin.
-- ``REJECT``: fails something no small change fixes: BRAIN refuses it, it is crowded, it
-  lowers a pool, it repeats a recent idea, or it has a reversion component.
+- ``REJECT``: fails something no small change fixes: BRAIN refuses it, it is crowded (or its
+  PnL twin was), it lowers a pool, it repeats a recent idea, or it has a reversion component.
 
 Pure: everything it reads is in :class:`Facts`, so every rule is tested without BRAIN.
 """
@@ -95,6 +95,10 @@ class Facts:
     fields: int | None = None
     #: Matches the month's Power Pool theme in its market (``None`` where there is none).
     theme_match: bool | None = None
+    #: A checked Alpha its daily PnL moves with, and the production correlation BRAIN
+    #: measured for it: what this one's check will most likely say (see ``agents.twins``).
+    twin_of: str | None = None
+    twin_prod: float | None = None
 
 
 @dataclass(slots=True)
@@ -138,6 +142,13 @@ def judge(f: Facts) -> Judgement:
     hard.extend(f"BRAIN_{n}" for n in refused)
     if f.prod_correlation is not None and f.prod_correlation >= CORRELATION_CEILING:
         hard.append("PROD_CORRELATION")
+    elif (
+        f.prod_correlation is None
+        and f.twin_prod is not None
+        and f.twin_prod >= CORRELATION_CEILING
+    ):
+        # Its twin failed; 94% of twins land on the same side. Not worth a check.
+        hard.append("PROD_TWIN")
     if f.self_correlation is not None and f.self_correlation >= CORRELATION_CEILING:
         hard.append("SELF_CORRELATION")
     if f.lookalike_of:
@@ -212,7 +223,8 @@ def judge(f: Facts) -> Judgement:
 
     score = (f.whole_delta or 0.0) + (f.power_delta or 0.0)
     score += 0.01 * ((ratio or 0.0) + (f.fitness or 0.0))
-    score -= 0.05 * (f.prod_correlation or CORRELATION_CEILING)
+    prod = f.prod_correlation if f.prod_correlation is not None else f.twin_prod
+    score -= 0.05 * (prod if prod is not None else CORRELATION_CEILING)
     return Judgement(
         alpha_id=f.alpha_id,
         verdict=verdict,

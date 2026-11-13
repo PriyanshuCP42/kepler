@@ -16,7 +16,9 @@ families found. Then it scores each one:
   without one Critic pass is cooled, so effort cannot pile into it again.
 
 A plan takes the top niches, keeps one place for a niche barely tried, splits the simulations
-between them by score, and writes one Search Lab task for each, not started.
+between them by score, and writes one task for each, not started: the template engine's
+recipe fitted to a dataset of the niche's category where it has one, a Search Lab task
+otherwise.
 """
 
 import asyncio
@@ -331,6 +333,13 @@ class Strategist:
         skipped: list[dict[str, Any]] = []
         for niche in planned:
             label = f"{niche['region']} D{niche['delay']} {niche['categoryName']}"
+            fitted = await self._engine_task(niche, cores)
+            if fitted is not None:
+                added.append(
+                    {"id": fitted.id, "niche": label, "simulations": niche["simulations"]}
+                    | {"datasets": [], "universe": None, "engine": fitted.name}
+                )
+                continue
             market = await self.market(niche, schema)
             if market is None:
                 skipped.append({"niche": label, "reason": "No dataset of it is downloaded."})
@@ -365,6 +374,25 @@ class Strategist:
                 "strategist", f"Planned {len(added)} Search Lab tasks; run them from Tasks."
             )
         return {"added": added, "skipped": skipped}
+
+    async def _engine_task(self, niche: dict[str, Any], cores: int) -> Any:
+        """The template engine's task for a niche: a recipe fitted to the shape of a dataset
+        of the niche's category, which passes far more often than a generic search. ``None``
+        where the engine has nothing there."""
+        from ..labs import engine
+
+        try:
+            return await engine.plan_niche(
+                self.state,
+                niche["region"],
+                niche["delay"],
+                niche["category"],
+                niche["simulations"],
+                cores,
+            )
+        except Exception:
+            log.warning("strategist.engine_failed", niche=niche.get("category"), exc_info=True)
+            return None
 
     async def _themes(self) -> list[Any]:
         source = getattr(self.state, "themes", None)

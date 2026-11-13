@@ -778,6 +778,25 @@ class AlphaVault:
         )
         return await asyncio.to_thread(_grid, table)
 
+    async def prod_checked(self, regions: list[str]) -> list[dict[str, Any]]:
+        """Alphas in these regions whose production correlation BRAIN has measured, with a
+        stored daily PnL: the ones a new Alpha can be looked up against."""
+        if not regions:
+            return []
+        placeholders = ", ".join("?" for _ in regions)
+        return await self.catalog.query(
+            f"""
+            SELECT alpha_id, region, checks, prod_correlation FROM alpha
+            WHERE region IN ({placeholders})
+              AND (
+                  prod_correlation IS NOT NULL
+                  OR regexp_matches(checks, '"PROD_CORRELATION", "result": "(PASS|FAIL)"')
+              )
+              AND alpha_id IN ({PNL_STORED})
+            """,  # noqa: S608
+            [*regions, SERIES_VERSION],
+        )
+
     async def submitted_members(self) -> list[dict[str, Any]]:
         """Every submitted Alpha with what the Portfolio page filters on.
 

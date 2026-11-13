@@ -5721,6 +5721,10 @@ export interface components {
             themeMatch: boolean | null;
             /** Turnover */
             turnover: number | null;
+            /** Twinof */
+            twinOf?: string | null;
+            /** Twinprod */
+            twinProd?: number | null;
             /** Universe */
             universe: string | null;
             /** Verdict */

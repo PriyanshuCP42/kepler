@@ -7,6 +7,7 @@ import {
   DnaIcon,
   LayersIcon,
   type LucideIcon,
+  ScanSearchIcon,
   SearchIcon,
   ZapIcon,
 } from 'lucide-react'
@@ -17,6 +18,7 @@ import { Page, PageHeader } from '@/ui/kit'
 const ICONS: Record<(typeof LAB_TABS)[number]['tab'], LucideIcon> = {
   search: SearchIcon,
   template: BracesIcon,
+  engine: ScanSearchIcon,
   evolution: DnaIcon,
   'power-pool': ZapIcon,
   'super-alpha': LayersIcon,
@@ -26,6 +28,8 @@ const ICONS: Record<(typeof LAB_TABS)[number]['tab'], LucideIcon> = {
 const ABOUT: Record<(typeof LAB_TABS)[number]['tab'], string> = {
   search: 'Writes one- and two-operator Alphas from the datasets you pick, steering to Sharpe.',
   template: 'Searches a template you type, with $variables for fields, values and operators.',
+  engine:
+    'Reads what each dataset holds, writes the recipe fitted to it, and learns which recipes pass.',
   evolution: 'Breeds new Alphas from seeds you pick, holding the last two years back as a test.',
   'power-pool': 'An LLM writes Power Pool Alphas for the datasets you pick.',
   'super-alpha': "Combines your submitted Alphas into SuperAlphas that pass BRAIN's checks.",

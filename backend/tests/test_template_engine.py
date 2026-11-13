@@ -88,3 +88,9 @@ def test_a_choice_becomes_a_task_with_its_regions_rules():
     )
     # No recipe carries a reversion term.
     assert all("returns" not in r.template for r in recipes.RECIPES)
+
+
+async def test_the_engine_declines_niches_it_does_not_search():
+    # Delay 0, or a region without market rules: the Strategist's Search Lab takes them.
+    assert await engine.plan_niche(None, "USA", 0, "news", 100, 2) is None
+    assert await engine.plan_niche(None, "KOR", 1, "news", 100, 2) is None

@@ -145,3 +145,27 @@ def test_a_theme_universe_still_wins_over_the_measured_one():
         )
     )
     assert found["universe"] == "TOP2500"
+
+
+async def test_a_niche_the_engine_can_fit_gets_an_engine_task_not_a_generic_search():
+    niche = {"region": "USA", "delay": 1, "category": "news", "categoryName": "News"}
+
+    class Fitted(st.Strategist):
+        async def plan(self, count=5, simulations=1500):
+            return [niche | {"simulations": 200}, niche | {"delay": 0, "simulations": 100}]
+
+        async def _engine_task(self, n, cores):
+            return SimpleNamespace(id=7, name="Engine · x") if n["delay"] == 1 else None
+
+        async def market(self, n, schema):
+            return None  # no Search Lab fallback either
+
+    async def schema():
+        return {}
+
+    state = SimpleNamespace(metadata=SimpleNamespace(cached_settings_schema=schema))
+    bus = SimpleNamespace(handoff=lambda *a: None, say=lambda *a: None)
+    result = await Fitted(state, bus).add_tasks(2, 300, 2)
+    assert [a["id"] for a in result["added"]] == [7]
+    assert result["added"][0]["engine"] == "Engine · x"
+    assert [s["niche"] for s in result["skipped"]] == ["USA D0 News"]

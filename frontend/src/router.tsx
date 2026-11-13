@@ -91,6 +91,11 @@ const templateLab = createRoute({
     'TemplateLabScreen',
   ),
 })
+const engineLab = createRoute({
+  getParentRoute: () => labs,
+  path: 'engine',
+  component: lazyRouteComponent(() => import('@/screens/research-labs/engine'), 'EngineScreen'),
+})
 const evolutionLab = createRoute({
   getParentRoute: () => labs,
   path: 'evolution',
@@ -256,7 +261,15 @@ const routeTree = root.addChildren([
   dashboard,
   matrix,
   data,
-  labs.addChildren([labsIndex, searchLab, templateLab, evolutionLab, powerPoolLab, superAlphaLab]),
+  labs.addChildren([
+    labsIndex,
+    searchLab,
+    templateLab,
+    engineLab,
+    evolutionLab,
+    powerPoolLab,
+    superAlphaLab,
+  ]),
   tools.addChildren([toolsIndex, settingsSampler, correlationBreaker, fieldsSampler]),
   competitionsRoute.addChildren([competitionsIndex, competitionsTab]),
   tasks.addChildren([tasksIndex, taskResults]),

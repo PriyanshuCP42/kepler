@@ -23,7 +23,7 @@ from ..labs.fastexpr import ParseError, data_fields
 from ..labs.template import program
 from ..vault.store import json_list
 from ..vault.yields import checks_of
-from . import gate
+from . import gate, twins
 
 if TYPE_CHECKING:
     from ..api.lab_tasks import TaskAlpha
@@ -54,6 +54,7 @@ class Measured:
     power_before: float | None
     lookalike_of: str | None
     datasets: frozenset[str]
+    twin: twins.Twin | None
     facts: gate.Facts
     judgement: gate.Judgement
 
@@ -132,6 +133,13 @@ async def measure(state: Any, picked: list[TaskAlpha]) -> list[Measured]:
     expressions = {i: str((stored.get(i) or {}).get("expression") or "") for i in ids}
     expressions |= {f"sub:{m['alpha_id']}": str(m.get("expression") or "") for m in recent}
     datasets = await datasets_of(state, expressions)
+    try:
+        found_twins = await twins.find(
+            state, {i: str((stored.get(i) or {}).get("region") or "") for i in ids}
+        )
+    except Exception:  # A lookup that fails leaves BRAIN's check to say it.
+        log.warning("picks.twins_failed", exc_info=True)
+        found_twins = {}
 
     out: list[Measured] = []
     for a in picked:
@@ -201,6 +209,8 @@ async def measure(state: Any, picked: list[TaskAlpha]) -> list[Measured]:
             operators=operators,
             fields=fields,
             theme_match=theme_match,
+            twin_of=twin.alpha_id if (twin := found_twins.get(alpha_id)) else None,
+            twin_prod=twin.prod_correlation if twin else None,
         )
         out.append(
             Measured(
@@ -217,6 +227,7 @@ async def measure(state: Any, picked: list[TaskAlpha]) -> list[Measured]:
                 power_before=power_before,
                 lookalike_of=lookalike,
                 datasets=mine,
+                twin=twin,
                 facts=facts,
                 judgement=gate.judge(facts),
             )

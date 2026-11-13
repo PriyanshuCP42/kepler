@@ -185,15 +185,23 @@ def choose(
 
 
 async def diagnose(
-    state: Any, region: str, avoid: frozenset[str] = frozenset()
+    state: Any,
+    region: str,
+    avoid: frozenset[str] = frozenset(),
+    category: str | None = None,
 ) -> list[doctor.Candidate]:
-    """The Dataset Doctor's candidates in ``region``'s main universe."""
+    """The Dataset Doctor's candidates in ``region``'s main universe, of one dataset
+    ``category`` only when given."""
     market = recipes.market_of(region)
     if market is None:
         return []
     scope = Tuple4(region=region, delay=1, universe=market.universes[0])
     datasets = await state.queries.datasets(scope)
     datasets = [d for d in datasets if d.get("dataset_id") not in doctor.EXCLUDED | avoid]
+    if category is not None:
+        datasets = [d for d in datasets if str(d.get("category_id") or "").lower() == category]
+    if not datasets:
+        return []
     datasets.sort(
         key=lambda d: -float(d.get("value_score") or 0) * float(d.get("pyramid_multiplier") or 1)
     )
@@ -272,6 +280,27 @@ async def plan(state: Any, region: str, count: int = 3, seed: int | None = None)
     return added
 
 
+async def plan_niche(
+    state: Any, region: str, delay: int, category: str, simulations: int, cores: int
+) -> AddedTask | None:
+    """One engine task for a pyramid the Strategist chose, or ``None`` when the engine has no
+    recipe there (a delay or region it does not search, or no usable dataset of the category).
+    The Strategist then falls back to a Search Lab task."""
+    from ..api.template_lab import add_task
+
+    if delay != 1 or recipes.market_of(region) is None:
+        return None
+    avoid = await submitted_datasets(state, region) | await busy_datasets(state, region)
+    found = await diagnose(state, region, frozenset(avoid), category.lower())
+    chosen = choose(found, await records(state), region, 1, random.Random())
+    if not chosen:
+        return None
+    task = task_for(chosen[0], region).model_copy(
+        update={"simulations": simulations, "cores": cores}
+    )
+    return await add_task(task, state)
+
+
 __all__ = [
     "PREFIX",
     "RETIRE_TRIES",
@@ -283,6 +312,7 @@ __all__ = [
     "parse_name",
     "passes",
     "plan",
+    "plan_niche",
     "records",
     "tally",
     "task_for",

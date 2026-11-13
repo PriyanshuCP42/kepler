@@ -218,6 +218,10 @@ class Pick(Out):
     power_delta: float | None
     #: The recent submission whose dataset it repeats in the same market.
     lookalike_of: str | None
+    #: The checked Alpha whose daily PnL this one moves with, and BRAIN's production
+    #: correlation for it: what this one's check will most likely say.
+    twin_of: str | None = None
+    twin_prod: float | None = None
     datasets: list[str]
     #: READY, CHECK, REPAIR or REJECT.
     verdict: str
@@ -262,6 +266,8 @@ def to_pick(m: Any) -> Pick:
         whole_delta=m.whole_delta,
         power_delta=m.power_delta,
         lookalike_of=m.lookalike_of,
+        twin_of=m.twin.alpha_id if m.twin else None,
+        twin_prod=m.twin.prod_correlation if m.twin else None,
         datasets=sorted(m.datasets),
         verdict=str(j.verdict),
         reasons=j.reasons,
