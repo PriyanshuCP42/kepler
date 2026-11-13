@@ -66,7 +66,7 @@ def _sharpe(figures: dict[str, Any] | None) -> float | None:
     return _num((figures or {}).get("sharpe"))
 
 
-async def _datasets(state: Any, expressions: dict[str, str]) -> dict[str, frozenset[str]]:
+async def datasets_of(state: Any, expressions: dict[str, str]) -> dict[str, frozenset[str]]:
     """Each expression's datasets, helper datasets left out."""
     fields: dict[str, list[str]] = {}
     for key, text in expressions.items():
@@ -131,7 +131,7 @@ async def measure(state: Any, picked: list[TaskAlpha]) -> list[Measured]:
     recent = [m for m in members if str(m.get("date_submitted") or "")[:10] >= since]
     expressions = {i: str((stored.get(i) or {}).get("expression") or "") for i in ids}
     expressions |= {f"sub:{m['alpha_id']}": str(m.get("expression") or "") for m in recent}
-    datasets = await _datasets(state, expressions)
+    datasets = await datasets_of(state, expressions)
 
     out: list[Measured] = []
     for a in picked:
@@ -245,4 +245,4 @@ def shortlist(rows: list[TaskAlpha]) -> list[TaskAlpha]:
     return out[:DEPTH]
 
 
-__all__ = ["DEPTH", "Measured", "measure", "shortlist"]
+__all__ = ["DEPTH", "Measured", "datasets_of", "measure", "shortlist"]

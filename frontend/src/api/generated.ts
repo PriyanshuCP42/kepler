@@ -1196,6 +1196,67 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/engine/doctor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Doctor View
+         * @description Each promising dataset in the region and the shape of its usable fields, best first.
+         */
+        get: operations["doctor_view_api_engine_doctor_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/engine/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Plan
+         * @description Write engine tasks for the region, not started. The Daily Autopilot starts them.
+         */
+        post: operations["plan_api_engine_plan_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/engine/scoreboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Scoreboard
+         * @description How each recipe has done for each shape and region: trials, passes, and whether it is
+         *     retired there.
+         */
+        get: operations["scoreboard_api_engine_scoreboard_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/evolution-lab/options": {
         parameters: {
             query?: never;
@@ -4179,6 +4240,23 @@ export interface components {
             /** Unmeasured */
             unmeasured: number;
         };
+        /** Diagnosis */
+        Diagnosis: {
+            /** Categoryid */
+            categoryId: string;
+            /** Datasetid */
+            datasetId: string;
+            /** Fields */
+            fields: number;
+            /** Notes */
+            notes: string[];
+            /** Priority */
+            priority: number;
+            /** Recipes */
+            recipes: string[];
+            /** Shape */
+            shape: string;
+        };
         /** DocBlock */
         DocBlock: {
             /** Text */
@@ -5667,19 +5745,6 @@ export interface components {
             /** Repair */
             repair: components["schemas"]["Pick"][];
         };
-        /** PlanRequest */
-        PlanRequest: {
-            /**
-             * Cores
-             * @default 4
-             */
-            cores: number;
-            /**
-             * Start
-             * @default false
-             */
-            start: boolean;
-        };
         /** PlanTotals */
         PlanTotals: {
             /** Batches */
@@ -5712,6 +5777,13 @@ export interface components {
             started: boolean;
             /** Tasks */
             tasks: components["schemas"]["PlannedTask"][];
+        };
+        /** Planned */
+        Planned: {
+            /** Added */
+            added: number[];
+            /** Region */
+            region: string;
         };
         /** PlannedTask */
         PlannedTask: {
@@ -6403,6 +6475,25 @@ export interface components {
             /** Name */
             name: string;
         };
+        /** RecipeRecord */
+        RecipeRecord: {
+            /** Passes */
+            passes: number;
+            /** Rate */
+            rate: number | null;
+            /** Recipe */
+            recipe: string;
+            /** Region */
+            region: string;
+            /** Retired */
+            retired: boolean;
+            /** Shape */
+            shape: string;
+            /** Title */
+            title: string;
+            /** Tries */
+            tries: number;
+        };
         /** RegionPlan */
         RegionPlan: {
             /** Cost */
@@ -6585,6 +6676,13 @@ export interface components {
              * @description Omit to start a new conversation
              */
             thread_id?: number | null;
+        };
+        /** Scoreboard */
+        Scoreboard: {
+            /** Records */
+            records: components["schemas"]["RecipeRecord"][];
+            /** Retireafter */
+            retireAfter: number;
         };
         /** SearchRequest */
         SearchRequest: {
@@ -7909,6 +8007,29 @@ export interface components {
             /** Verificationurl */
             verificationUrl: string | null;
         };
+        /** PlanRequest */
+        alpha_harness__api__agents__PlanRequest: {
+            /**
+             * Cores
+             * @default 4
+             */
+            cores: number;
+            /**
+             * Start
+             * @default false
+             */
+            start: boolean;
+        };
+        /** PlanRequest */
+        alpha_harness__api__engine__PlanRequest: {
+            /**
+             * Count
+             * @default 3
+             */
+            count: number;
+            /** Region */
+            region: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -8007,7 +8128,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["PlanRequest"];
+                "application/json": components["schemas"]["alpha_harness__api__agents__PlanRequest"];
             };
         };
         responses: {
@@ -9523,6 +9644,91 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkflowStarted"];
+                };
+            };
+        };
+    };
+    doctor_view_api_engine_doctor_get: {
+        parameters: {
+            query: {
+                /** @description USA, GLB, ASI or EUR */
+                region: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Diagnosis"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    plan_api_engine_plan_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["alpha_harness__api__engine__PlanRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Planned"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    scoreboard_api_engine_scoreboard_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Scoreboard"];
                 };
             };
         };

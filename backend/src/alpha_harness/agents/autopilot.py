@@ -4,7 +4,8 @@ Every :data:`TICK_SECONDS` it reads the day and acts:
 
 - **Spend the quota.** While today's simulations are under the target and cores are free,
   it starts tasks that were added but never run, oldest first. With none waiting and the day
-  behind pace, it asks the Strategist to plan some, at most once a BRAIN day.
+  behind pace, it asks the template engine to write some (the Strategist if the engine finds
+  nothing), at most once a BRAIN day.
 - **Check the picks.** Every :data:`CHECK_EVERY_SECONDS` it asks BRAIN's submission check of
   the strongest Today's Picks that have not had one, a few at a time, inside BRAIN's hourly
   limit on correlation checks. A pick it has asked about is not asked again for a day.
@@ -57,6 +58,10 @@ PACE_SLACK = 200
 #: Only tasks added this recently are started; older idle ones were left on purpose.
 IDLE_TASK_DAYS = 14
 DAY_SECONDS = 24 * 3600.0
+#: Regions the template engine plans for, and how many tasks each gets per plan: USA and GLB
+#: for the challenge, ASI for the third Osmosis region.
+ENGINE_REGIONS = ("USA", "GLB", "ASI")
+ENGINE_TASKS_PER_REGION = 3
 
 
 @dataclass(slots=True)
@@ -255,13 +260,27 @@ class DailyAutopilot:
         return ids
 
     async def _plan(self) -> None:
+        """New tasks from the template engine, for each region it knows; the Strategist's
+        searches only if the engine finds nothing to try."""
+        from ..labs import engine
+
         self._planned_day = platform_midnight().date().isoformat()
+        added = 0
+        for region in ENGINE_REGIONS:
+            try:
+                added += len(await engine.plan(self.state, region, ENGINE_TASKS_PER_REGION))
+            except Exception:
+                log.warning("autopilot.engine_plan_failed", region=region, exc_info=True)
+        if added:
+            self.bus.count("strategist", "engine tasks written", added)
+            log.info("autopilot.planned", engine=added)
+            return
         try:
-            added = await self.state.strategist.add_tasks(count=3, simulations=500, cores=2)
+            planned = await self.state.strategist.add_tasks(count=3, simulations=500, cores=2)
         except Exception:
             log.warning("autopilot.plan_failed", exc_info=True)
             return
-        log.info("autopilot.planned", added=len(added.get("added", [])))
+        log.info("autopilot.planned", strategist=len(planned.get("added", [])))
 
     async def _check_picks(self) -> list[str]:
         now = time.monotonic()
