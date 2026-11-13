@@ -9655,7 +9655,7 @@ export interface operations {
     doctor_view_api_engine_doctor_get: {
         parameters: {
             query: {
-                /** @description USA, GLB, ASI or EUR */
+                /** @description USA, GLB, ASI, EUR, IND or KOR */
                 region: string;
             };
             header?: never;

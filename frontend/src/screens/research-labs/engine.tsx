@@ -28,7 +28,7 @@ type Diagnosis = components['schemas']['Diagnosis']
 type Scoreboard = components['schemas']['Scoreboard']
 type Planned = components['schemas']['Planned']
 
-const REGIONS = ['USA', 'GLB', 'ASI', 'EUR'] as const
+const REGIONS = ['USA', 'GLB', 'ASI', 'IND', 'EUR', 'KOR'] as const
 type Region = (typeof REGIONS)[number]
 
 const SHAPE: Record<string, string> = {

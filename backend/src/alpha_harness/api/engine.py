@@ -52,7 +52,7 @@ class Planned(Out):
 
 @router.get("/doctor")
 async def doctor_view(
-    state: State, region: Annotated[str, Query(description="USA, GLB, ASI or EUR")]
+    state: State, region: Annotated[str, Query(description="USA, GLB, ASI, EUR, IND or KOR")]
 ) -> list[Diagnosis]:
     """Each promising dataset in the region and the shape of its usable fields, best first."""
     if recipes.market_of(region) is None:

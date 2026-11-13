@@ -55,9 +55,10 @@ def test_a_recipe_that_never_passes_is_retired_and_skipped():
 def test_recipes_that_work_are_chosen_more_often():
     c = Candidate("news_a", "news", Shape.COUNT, ["f1"], priority=5.0)
     learned = {
-        ("own-history-neutral", "count", "USA"): engine.Record(tries=60, passes=15),
-        ("own-history-ranked", "count", "USA"): engine.Record(tries=60, passes=1),
+        (r.key, "count", "USA"): engine.Record(tries=60, passes=1)
+        for r in recipes.for_shape(Shape.COUNT)
     }
+    learned[("own-history-neutral", "count", "USA")] = engine.Record(tries=60, passes=15)
     rng = random.Random(7)
     picked = [engine.choose([c], learned, "USA", 1, rng)[0].recipe.key for _ in range(200)]
     assert picked.count("own-history-neutral") > 180
@@ -76,7 +77,8 @@ def test_one_search_per_dataset_most_valuable_first():
 def test_a_choice_becomes_a_task_with_its_regions_rules():
     c = Candidate("mmp_nlp_sentiment", "other", Shape.COUNT, ["count_x", "count_y"], priority=1.0)
     task = engine.task_for(engine.Choice(c, recipes.BY_KEY["own-history-neutral"], 1.0), "ASI")
-    assert task.region == "ASI" and task.universes == ["MINVOL1M"]
+    # MINVOL10M: the universe of BRAIN's 2x ASI D1 theme.
+    assert task.region == "ASI" and task.universes == ["MINVOL10M"]
     assert task.investability == ["max_trade"]  # ASI's investability rule
     assert task.neutralizations == ["STATISTICAL", "SLOW"]
     assert task.variables["f"].filter.field_ids == ["count_x", "count_y"]
@@ -93,7 +95,7 @@ def test_a_choice_becomes_a_task_with_its_regions_rules():
 async def test_the_engine_declines_niches_it_does_not_search():
     # Delay 0, or a region without market rules: the Strategist's Search Lab takes them.
     assert await engine.plan_niche(None, "USA", 0, "news", 100, 2) is None
-    assert await engine.plan_niche(None, "KOR", 1, "news", 100, 2) is None
+    assert await engine.plan_niche(None, "JPN", 1, "news", 100, 2) is None
 
 
 def test_own_history_recipes_are_slow_enough_to_beat_trading_costs():
@@ -101,3 +103,20 @@ def test_own_history_recipes_are_slow_enough_to_beat_trading_costs():
     for key in ("own-history-neutral", "own-history-ranked"):
         decays = [int(d) for d in recipes.BY_KEY[key].values["d"].split(",")]
         assert min(decays) >= 20, key
+
+
+def test_every_recipe_fits_power_pool_and_playbook_ones_say_where_they_came_from():
+    from alpha_harness.labs.fastexpr import data_fields, operator_count
+    from alpha_harness.labs.template import program
+
+    for r in recipes.RECIPES:
+        text = r.template.replace("$f", "some_field")
+        for name, values in r.values.items():
+            text = text.replace(f"${name}", values.split(",")[0].strip())
+        tree = program(text)
+        assert operator_count(tree) <= 8, r.key
+        assert len(data_fields(tree)) <= 3, r.key
+    turnover = recipes.BY_KEY["own-history-target-turnover"]
+    assert turnover.playbook == "operators-slide" and "ts_target_tvr_hump" in turnover.template
+    # One target sits inside the GLB 15-30% turnover theme band.
+    assert any(0.15 <= float(t) <= 0.3 for t in turnover.values["t"].split(","))

@@ -41,6 +41,8 @@ class Recipe:
     decay: int = 0
     #: Why it should work, for the task and for the Playbook.
     idea: str = ""
+    #: The Playbook insight it comes from, when it does.
+    playbook: str | None = None
 
 
 RECIPES: tuple[Recipe, ...] = (
@@ -62,6 +64,39 @@ RECIPES: tuple[Recipe, ...] = (
         template=f"$s * ts_decay_linear(group_rank({_OWN_HISTORY}, industry), $d)",
         values={"s": "1, -1", "d": _SLOW},
         idea="The same extreme, ranked among industry peers so no few names dominate.",
+    ),
+    Recipe(
+        key="own-history-target-turnover",
+        title="Own-history extreme, industry neutral, held to a target turnover",
+        shapes=frozenset({Shape.COUNT, Shape.LEVEL, Shape.PROBABILITY}),
+        template=(
+            f"$s * ts_target_tvr_hump(group_neutralize({_OWN_HISTORY}, industry), "
+            "lambda_min=0, lambda_max=1, target_tvr=$t)"
+        ),
+        values={"s": "1, -1", "t": "0.12, 0.18"},
+        idea=(
+            "The own-history extreme, slowed only as far as a turnover target needs: WorldQuant "
+            "measured this operator lifting margin 36% and Fitness 14% for 3% of Sharpe, where "
+            "a long decay costs more. A target of 0.18 also lands in the GLB 15-30% theme band."
+        ),
+        playbook="operators-slide",
+    ),
+    Recipe(
+        key="convex-own-history",
+        title="Own-year rank within industry, convex, held to a target turnover",
+        shapes=frozenset({Shape.COUNT, Shape.LEVEL, Shape.ESTIMATE}),
+        template=(
+            "$s * ts_target_tvr_decay(signed_power("
+            "group_rank(ts_rank(ts_backfill($f, 60), 250), industry) - 0.5, 2), "
+            "lambda_min=0, lambda_max=1, target_tvr=$t)"
+        ),
+        values={"s": "1, -1", "t": "0.1, 0.15"},
+        idea=(
+            "Squaring the centred rank puts the weight on the extremes, which raised returns "
+            "and cut production correlation from 0.69 to 0.58 on a slow signal here; six "
+            "operators keep it short for the tie-breakers."
+        ),
+        playbook="lesson-decay",
     ),
     Recipe(
         key="estimate-revision",
@@ -119,16 +154,21 @@ class Market:
     truncation: float = 0.05
 
 
-#: Each region's rules, learned on this account:
+#: Each region's rules, learned on this account and from the Playbook:
 #: - USA: TOP3000 with STATISTICAL kept production correlation lowest.
-#: - ASI: MINVOL1M with Max Trade on, since its news Alphas otherwise failed BRAIN's
-#:   investability check.
+#: - ASI: MINVOL10M, the universe of BRAIN's 2x ASI D1 theme (``asi-d1-minvol10m-theme``),
+#:   with Max Trade on, since its news Alphas otherwise failed BRAIN's investability check.
 #: - EUR: its theme asks for CROWDING or SLOW_AND_FAST.
+#: - IND: TOP500, where a hedge-fund holdings family reached Sharpe 3.5; the fourth Osmosis
+#:   region (``third-osmosis-region``).
+#: - KOR: TOP600, where WorldQuant measured 19% higher Sharpe (``universes-slide``).
 MARKETS: dict[str, Market] = {
     "USA": Market(universes=("TOP3000",), truncation=0.08),
     "GLB": Market(universes=("TOP3000",)),
-    "ASI": Market(universes=("MINVOL1M",), investability=("max_trade",)),
+    "ASI": Market(universes=("MINVOL10M",), investability=("max_trade",)),
     "EUR": Market(universes=("TOP2500",), neutralizations=("CROWDING", "SLOW_AND_FAST")),
+    "IND": Market(universes=("TOP500",)),
+    "KOR": Market(universes=("TOP600",)),
 }
 
 

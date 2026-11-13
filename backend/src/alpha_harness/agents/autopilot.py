@@ -60,7 +60,7 @@ IDLE_TASK_DAYS = 14
 DAY_SECONDS = 24 * 3600.0
 #: Regions the template engine plans for, and how many tasks each gets per plan: USA and GLB
 #: for the challenge, ASI for the third Osmosis region.
-ENGINE_REGIONS = ("USA", "GLB", "ASI")
+ENGINE_REGIONS = ("USA", "GLB", "ASI", "IND")
 ENGINE_TASKS_PER_REGION = 3
 
 
