@@ -110,7 +110,7 @@ def test_every_recipe_fits_power_pool_and_playbook_ones_say_where_they_came_from
     from alpha_harness.labs.template import program
 
     for r in recipes.RECIPES:
-        text = r.template.replace("$f", "some_field")
+        text = r.template.replace("$f", "some_field").replace("$g", "other_field")
         for name, values in r.values.items():
             text = text.replace(f"${name}", values.split(",")[0].strip())
         tree = program(text)
@@ -120,3 +120,21 @@ def test_every_recipe_fits_power_pool_and_playbook_ones_say_where_they_came_from
     assert turnover.playbook == "operators-slide" and "ts_target_tvr_hump" in turnover.template
     # One target sits inside the GLB 15-30% turnover theme band.
     assert any(0.15 <= float(t) <= 0.3 for t in turnover.values["t"].split(","))
+
+
+def test_pair_recipes_read_two_fields_of_one_dataset_and_region_recipes_stay_home():
+    pair = recipes.BY_KEY["pair-event-spread"]
+    assert pair.pair and not recipes.BY_KEY["own-history-neutral"].pair
+    # The second field comes from the same dataset's fields; the lab never draws one twice.
+    c = Candidate("model_x", "model", Shape.LEVEL, ["lvl_a", "lvl_b"], priority=1.0)
+    task = engine.task_for(engine.Choice(c, pair, 1.0), "USA")
+    assert task.variables["g"].filter.field_ids == ["lvl_a", "lvl_b"]
+    assert task.variables["g"].dataset_ids == ["model_x"]
+    # One usable field is no pair, and the country-by-industry recipe is GLB's alone.
+    lone = Candidate("model_y", "model", Shape.LEVEL, ["lvl_a"], priority=1.0)
+    rng = random.Random(5)
+    keys = {engine.choose([lone], {}, "USA", 1, rng)[0].recipe.key for _ in range(300)}
+    assert keys and not any(recipes.BY_KEY[k].pair for k in keys)
+    assert "glb-country-industry-peers" not in keys
+    glb = {engine.choose([c], {}, "GLB", 1, rng)[0].recipe.key for _ in range(300)}
+    assert "glb-country-industry-peers" in glb and "pair-event-spread" in glb

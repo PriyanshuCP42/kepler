@@ -1,10 +1,12 @@
 """Recipes: template structures for each field shape, and the market rules each region needs.
 
 Every recipe is a structure that earned its place on this account, written once as a template
-with ``$f`` for the field and small variables for what is searched. None has a reversion term
-(BRAIN warns it may stop accepting those), and each stays within Power Pool's limits of 8
-operators and 3 fields (``ts_backfill`` and grouping fields are not counted), so a winner can be
-a regular Alpha and a Power Pool one at once.
+with ``$f`` for the field and small variables for what is searched. A **pair** recipe also writes
+``$g``, a second field of the same dataset and shape: the spread between two sibling fields is
+the shape that passes most often, and a spread is less crowded than either level on its own.
+None has a reversion term (BRAIN warns it may stop accepting those), and each stays within
+Power Pool's limits of 8 operators and 3 fields (``ts_backfill`` and grouping fields are not
+counted), so a winner can be a regular Alpha and a Power Pool one at once.
 
 The engine picks among the recipes for a shape by how often each has reached the Submit Gate,
 so a recipe that keeps failing in a region stops getting quota there.
@@ -43,6 +45,18 @@ class Recipe:
     idea: str = ""
     #: The Playbook insight it comes from, when it does.
     playbook: str | None = None
+    #: The only regions it is written for, when it needs a region's own groups.
+    regions: frozenset[str] | None = None
+
+    @property
+    def pair(self) -> bool:
+        """Whether it reads two fields of the dataset, ``$f`` and ``$g``."""
+        return "$g" in self.template
+
+    def fits(self, region: str, fields: int) -> bool:
+        """Whether it can be written in ``region`` for a dataset with ``fields`` usable fields."""
+        home = self.regions is None or region in self.regions
+        return home and fields >= (2 if self.pair else 1)
 
 
 RECIPES: tuple[Recipe, ...] = (
@@ -134,6 +148,78 @@ RECIPES: tuple[Recipe, ...] = (
         template="$s * ts_decay_linear(group_rank(ts_mean(ts_backfill($f, 21), 5), industry), $d)",
         values={"s": "1, -1", "d": "5, 10"},
         idea="A model's probability is noisy day to day; a week's average carries its view.",
+    ),
+    Recipe(
+        key="pair-event-spread",
+        title="Two sibling fields' spread against its own quarter, traded when one updates",
+        shapes=frozenset({Shape.COUNT, Shape.LEVEL, Shape.ESTIMATE, Shape.PROBABILITY}),
+        template=(
+            "x = ts_backfill($f, 60); y = ts_backfill($g, 60); "
+            "trade_when(ts_delta(x, 1) != 0, rank(ts_zscore(rank(x) - rank(y), $w)), -1)"
+        ),
+        values={"w": "63, 126"},
+        idea=(
+            "When one of two related readings moves away from the other, the gap is news; "
+            "holding the position until the data next updates keeps turnover, and so trading "
+            "cost, low. Swapping the two fields flips the sign, so no sign is searched."
+        ),
+    ),
+    Recipe(
+        key="pair-rank-spread",
+        title="Two sibling fields' rank spread against its own year",
+        shapes=frozenset({Shape.COUNT, Shape.LEVEL, Shape.ESTIMATE, Shape.PROBABILITY}),
+        template=(
+            "ts_decay_linear(ts_rank(rank(ts_backfill($f, 60)) - rank(ts_backfill($g, 60)), "
+            "$w), $d)"
+        ),
+        values={"w": "126, 252", "d": "5, 10"},
+        idea=(
+            "Ranking each field first puts two different scales on one; where their gap sits "
+            "in its own year says which reading is ahead. Slow by construction, so margin is "
+            "high."
+        ),
+    ),
+    Recipe(
+        key="pair-demeaned",
+        title="One field against its sibling's recent average",
+        shapes=frozenset({Shape.LEVEL, Shape.ESTIMATE, Shape.PROBABILITY}),
+        template=(
+            "ts_decay_linear(rank(ts_backfill($f, 20) - ts_mean(ts_backfill($g, 20), $w) * $k), $d)"
+        ),
+        values={"w": "20, 60", "k": "0.5, 1", "d": "5, 10"},
+        idea=(
+            "Two horizons or quantiles of one model: today's reading of one against the recent "
+            "average of the other."
+        ),
+    ),
+    Recipe(
+        key="standardized-innovation",
+        title="Change from its own average, in units of its own volatility",
+        shapes=frozenset({Shape.COUNT, Shape.LEVEL, Shape.ESTIMATE}),
+        template=(
+            "$s * rank(ts_decay_linear(divide(ts_av_diff(ts_backfill($f, 60), $w), "
+            "add(ts_std_dev(ts_backfill($f, 60), $v), 0.0001)), $d))"
+        ),
+        values={"s": "1, -1", "w": "20, 60", "v": "60, 120", "d": "5, 10"},
+        idea=(
+            "A move is news in proportion to how unusual it is for that stock; the epsilon "
+            "keeps a flat field from dividing by zero."
+        ),
+    ),
+    Recipe(
+        key="glb-country-industry-peers",
+        title="Own-history extreme ranked among same-country industry peers",
+        shapes=frozenset({Shape.COUNT, Shape.LEVEL, Shape.ESTIMATE, Shape.PROBABILITY}),
+        template=(
+            "$s * ts_decay_linear(group_rank(ts_rank(ts_backfill($f, 60), $w), "
+            "group_cartesian_product(country, industry)), $d)"
+        ),
+        values={"s": "1, -1", "w": "120, 250", "d": "10, 20"},
+        idea=(
+            "Across countries an industry's levels differ for local reasons; comparing a stock "
+            "only with its own country's industry keeps the stock-specific part."
+        ),
+        regions=frozenset({"GLB"}),
     ),
 )
 

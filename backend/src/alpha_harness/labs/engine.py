@@ -162,7 +162,8 @@ def choose(
         options = [
             r
             for r in recipes.for_shape(c.shape)
-            if not learned.get((r.key, str(c.shape), region), Record()).retired
+            if r.fits(region, len(c.field_ids))
+            and not learned.get((r.key, str(c.shape), region), Record()).retired
         ]
         if not options:
             continue
@@ -227,14 +228,14 @@ def task_for(choice: Choice, region: str) -> Any:
     if market is None:
         raise ValueError(f"No market rules for {region}")
     r, c = choice.recipe, choice.candidate
-    variables: dict[str, Any] = {
-        "f": FieldsVariable(
-            kind="fields",
-            dataset_ids=[c.dataset_id],
-            filter=FieldFilter(field_ids=c.field_ids, field_types=["MATRIX", "VECTOR"]),
-            vector_operators=["vec_avg"],
-        )
-    }
+    fields = FieldsVariable(
+        kind="fields",
+        dataset_ids=[c.dataset_id],
+        filter=FieldFilter(field_ids=c.field_ids, field_types=["MATRIX", "VECTOR"]),
+        vector_operators=["vec_avg"],
+    )
+    # A pair recipe's second field comes from the same fields; the lab never draws one twice.
+    variables: dict[str, Any] = {"f": fields} | ({"g": fields} if r.pair else {})
     variables |= {k: ValuesVariable(kind="values", values=v) for k, v in r.values.items()}
     return TemplateTask(
         region=region,
