@@ -23,6 +23,11 @@ _OWN_HISTORY = (
     "vector_neut(ts_rank(ts_rank(ts_backfill($f, 60), 120), 750), rank(ts_delta(cap, 1)))"
 )
 
+#: Decays for the own-history recipes. Their first run held decay 8 and 14: Sharpe reached 2.2,
+#: but turnover of 22-33% left a margin near 3 bps, under the 5 bps trading cost, and Fitness
+#: under 1. At those returns, turnover near 15% clears both.
+_SLOW = "20, 40"
+
 
 @dataclass(frozen=True, slots=True)
 class Recipe:
@@ -44,7 +49,7 @@ RECIPES: tuple[Recipe, ...] = (
         title="Own-history extreme, size-move and industry neutral",
         shapes=frozenset({Shape.COUNT, Shape.LEVEL, Shape.PROBABILITY}),
         template=f"$s * ts_decay_linear(group_neutralize({_OWN_HISTORY}, industry), $d)",
-        values={"s": "1, -1", "d": "8, 14"},
+        values={"s": "1, -1", "d": _SLOW},
         idea=(
             "A reading at an extreme of the stock's own history carries news the price has not "
             "absorbed; removing the size move keeps it from being a reversal bet."
@@ -54,9 +59,8 @@ RECIPES: tuple[Recipe, ...] = (
         key="own-history-ranked",
         title="Own-history extreme, size-move neutral, ranked within industry",
         shapes=frozenset({Shape.COUNT, Shape.LEVEL}),
-        template=f"$s * group_rank({_OWN_HISTORY}, industry)",
-        values={"s": "1, -1"},
-        decay=8,
+        template=f"$s * ts_decay_linear(group_rank({_OWN_HISTORY}, industry), $d)",
+        values={"s": "1, -1", "d": _SLOW},
         idea="The same extreme, ranked among industry peers so no few names dominate.",
     ),
     Recipe(

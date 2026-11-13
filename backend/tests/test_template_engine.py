@@ -94,3 +94,10 @@ async def test_the_engine_declines_niches_it_does_not_search():
     # Delay 0, or a region without market rules: the Strategist's Search Lab takes them.
     assert await engine.plan_niche(None, "USA", 0, "news", 100, 2) is None
     assert await engine.plan_niche(None, "KOR", 1, "news", 100, 2) is None
+
+
+def test_own_history_recipes_are_slow_enough_to_beat_trading_costs():
+    # Fast versions reached Sharpe 2.2 but traded so much their margin stayed near 3 bps.
+    for key in ("own-history-neutral", "own-history-ranked"):
+        decays = [int(d) for d in recipes.BY_KEY[key].values["d"].split(",")]
+        assert min(decays) >= 20, key
