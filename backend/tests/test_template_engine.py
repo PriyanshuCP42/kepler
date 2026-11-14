@@ -89,8 +89,10 @@ def test_a_choice_becomes_a_task_with_its_regions_rules():
         "ASI",
         "mmp_nlp_sentiment",
     )
-    # No recipe carries a reversion term.
-    assert all("returns" not in r.template for r in recipes.RECIPES)
+    # No recipe carries a reversion term: returns appear only as volatility.
+    assert all(
+        "returns" not in r.template.replace("ts_std_dev(returns", "") for r in recipes.RECIPES
+    )
 
 
 async def test_the_engine_declines_niches_it_does_not_search():
@@ -115,7 +117,7 @@ def test_every_recipe_fits_power_pool_and_playbook_ones_say_where_they_came_from
         for name, values in r.values.items():
             text = text.replace(f"${name}", values.split(",")[0].strip())
         tree = program(text)
-        assert operator_count(tree) <= 8, r.key
+        assert operator_count(tree) <= (8 if r.power_pool else 12), r.key
         assert len(data_fields(tree)) <= 3, r.key
     turnover = recipes.BY_KEY["own-history-target-turnover"]
     assert turnover.playbook == "operators-slide" and "ts_target_tvr_hump" in turnover.template
@@ -139,3 +141,11 @@ def test_pair_recipes_read_two_fields_of_one_dataset_and_region_recipes_stay_hom
     assert "glb-country-industry-peers" not in keys
     glb = {engine.choose([c], {}, "GLB", 1, rng)[0].recipe.key for _ in range(300)}
     assert "glb-country-industry-peers" in glb and "pair-event-spread" in glb
+
+
+def test_one_plan_spreads_its_tasks_across_recipes():
+    cs = [Candidate(f"d{i}", "model", Shape.LEVEL, ["a", "b"], priority=9.0 - i) for i in range(5)]
+    for seed in range(20):
+        chosen = engine.choose(cs, {}, "USA", 5, random.Random(seed))
+        keys = [ch.recipe.key for ch in chosen]
+        assert len(keys) == 5 and len(set(keys)) == 5, keys

@@ -6,7 +6,8 @@ with ``$f`` for the field and small variables for what is searched. A **pair** r
 the shape that passes most often, and a spread is less crowded than either level on its own.
 None has a reversion term (BRAIN warns it may stop accepting those), and each stays within
 Power Pool's limits of 8 operators and 3 fields (``ts_backfill`` and grouping fields are not
-counted), so a winner can be a regular Alpha and a Power Pool one at once.
+counted), so a winner can be a regular Alpha and a Power Pool one at once; the one marked
+otherwise is a regular Alpha only.
 
 The engine picks among the recipes for a shape by how often each has reached the Submit Gate,
 so a recipe that keeps failing in a region stops getting quota there.
@@ -47,6 +48,8 @@ class Recipe:
     playbook: str | None = None
     #: The only regions it is written for, when it needs a region's own groups.
     regions: frozenset[str] | None = None
+    #: Within Power Pool's limits; ``False`` marks a regular-only structure.
+    power_pool: bool = True
 
     @property
     def pair(self) -> bool:
@@ -220,6 +223,38 @@ RECIPES: tuple[Recipe, ...] = (
             "only with its own country's industry keeps the stock-specific part."
         ),
         regions=frozenset({"GLB"}),
+    ),
+    Recipe(
+        key="peer-residual",
+        title="What a reading says beyond its group's average",
+        shapes=frozenset({Shape.LEVEL, Shape.ESTIMATE, Shape.PROBABILITY, Shape.COUNT}),
+        template=(
+            "$s * group_rank(ts_regression(ts_backfill($f, 60), "
+            "group_mean(ts_backfill($f, 60), 1, $g), $w), $g)"
+        ),
+        values={"s": "1, -1", "g": "sector, industry", "w": "250, 500"},
+        decay=4,
+        idea=(
+            "Regressing each stock's reading on its group's average leaves what is its own: "
+            "the part a sector-wide move does not explain. Four operators."
+        ),
+    ),
+    Recipe(
+        key="volatility-gated-convex",
+        title="Own-year rank, convex, traded only where stocks move",
+        shapes=frozenset({Shape.LEVEL, Shape.ESTIMATE, Shape.COUNT}),
+        template=(
+            "$s * trade_when(rank(ts_std_dev(returns, 244)) > 0.3, signed_power("
+            "group_rank(ts_rank(ts_backfill($f, 60), 250), $g) - 0.5, 2), -1)"
+        ),
+        values={"s": "1, -1", "g": "sector, industry"},
+        decay=6,
+        idea=(
+            "The quietest stocks rarely move enough to pay for a position; leaving them out and "
+            "weighting the extremes puts the book where a view can be paid. Nine operators, so "
+            "a regular Alpha only."
+        ),
+        power_pool=False,
     ),
     Recipe(
         key="volume-confirmed-peer-rank",

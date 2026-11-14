@@ -157,7 +157,7 @@ def choose(
     if not found:
         return []
     top = max(c.priority for c in found) or 1.0
-    picked: list[Choice] = []
+    ranked: list[tuple[float, doctor.Candidate, list[tuple[float, recipes.Recipe]]]] = []
     for c in found:
         options = [
             r
@@ -167,19 +167,24 @@ def choose(
         ]
         if not options:
             continue
-        draws = [
+        sampled = [
             (learned.get((r.key, str(c.shape), region), Record()).sample(rng), r) for r in options
         ]
-        rate, recipe = max(draws, key=lambda d: d[0])
-        picked.append(Choice(candidate=c, recipe=recipe, score=c.priority / top * rate))
-    picked.sort(key=lambda ch: -ch.score)
+        draws = sorted(sampled, key=lambda d: -d[0])
+        ranked.append((c.priority / top * draws[0][0], c, draws))
+    ranked.sort(key=lambda x: -x[0])
+    # One recipe per plan where the shapes allow it: tasks of one structure find Alphas that
+    # correlate with each other, and BRAIN refuses the second on self-correlation.
     seen: set[str] = set()
+    used: set[str] = set()
     out: list[Choice] = []
-    for ch in picked:
-        if ch.candidate.dataset_id in seen:
+    for _, c, draws in ranked:
+        if c.dataset_id in seen:
             continue
-        seen.add(ch.candidate.dataset_id)
-        out.append(ch)
+        rate, recipe = next(((d, r) for d, r in draws if r.key not in used), draws[0])
+        seen.add(c.dataset_id)
+        used.add(recipe.key)
+        out.append(Choice(candidate=c, recipe=recipe, score=c.priority / top * rate))
         if len(out) >= count:
             break
     return out
