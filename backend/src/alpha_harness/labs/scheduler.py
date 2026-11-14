@@ -217,6 +217,18 @@ async def _still_sending(optimizer: Optimizer, rows: list[Study]) -> set[int]:
     }
 
 
+#: Tasks that rework a near miss go first: a handful of simulations each, and on this account
+#: they reached BRAIN's bar far more often than a broad search that queued before them.
+FIRST = frozenset({REPAIR_SAMPLER, CORRELATION_BREAKER})
+
+
+def queue_order(waiting: list[Study]) -> list[Study]:
+    """Queued tasks in the order they start: reworks first, then by when each was queued."""
+    return sorted(
+        waiting, key=lambda r: (r.sampler not in FIRST, task_params(r).queued_at or "", r.id)
+    )
+
+
 async def start_waiting(optimizer: Optimizer) -> int:
     """Start queued tasks while their cores fit in the engine's slots. Returns how many."""
     async with scheduling:
@@ -239,10 +251,7 @@ async def start_waiting(optimizer: Optimizer) -> int:
             sending = await _still_sending(optimizer, running)
             running = [r for r in running if r.id in sending]
         used = sum(cores_of(r) for r in running)
-        waiting = sorted(
-            (r for r in rows if r.status == StudyStatus.QUEUED),
-            key=lambda r: (task_params(r).queued_at or "", r.id),
-        )
+        waiting = queue_order([r for r in rows if r.status == StudyStatus.QUEUED])
         by_id = {r.id: r for r in waiting}
         started = to_start([(r.id, cores_of(r)) for r in waiting], used, optimizer.engine.slots)
         for task_id in list(started):

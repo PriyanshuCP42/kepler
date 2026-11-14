@@ -60,3 +60,12 @@ async def test_only_old_open_trials_are_closed_as_lost(db) -> None:
         3: TrialState.COMPLETE,
     }
     assert messages == [scheduler.LOST, scheduler.LOST]
+
+
+def test_reworks_start_ahead_of_searches_queued_before_them(monkeypatch) -> None:
+    queued = {1: "2026-11-14T10:00:00", 2: "2026-11-14T11:00:00", 3: "2026-11-14T12:00:00"}
+    monkeypatch.setattr(scheduler, "task_params", lambda r: SimpleNamespace(queued_at=queued[r.id]))
+    search = SimpleNamespace(id=1, sampler="template")
+    later = SimpleNamespace(id=2, sampler="template")
+    rework = SimpleNamespace(id=3, sampler=scheduler.REPAIR_SAMPLER)
+    assert [r.id for r in scheduler.queue_order([search, later, rework])] == [3, 1, 2]
