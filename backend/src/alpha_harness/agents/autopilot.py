@@ -5,7 +5,10 @@ Every :data:`TICK_SECONDS` it reads the day and acts:
 - **Spend the quota.** While today's simulations are under the target and cores are free,
   it starts tasks that were added but never run, oldest first. With none waiting and the day
   behind pace, it asks the template engine to write some (the Strategist if the engine finds
-  nothing), at most once a BRAIN day.
+  nothing), at most once every :data:`PLAN_EVERY_SECONDS`.
+- **Rework the near misses.** Every :data:`REWORK_EVERY_SECONDS` it hands the strongest recent
+  Alphas BRAIN refused by a little to the Repair Engineer and starts the task (see
+  :mod:`.rework`): on this account that, not a broad search, is what reached BRAIN's bar.
 - **Check the picks.** Every :data:`CHECK_EVERY_SECONDS` it asks BRAIN's submission check of
   the strongest Today's Picks that have not had one, a few at a time, inside BRAIN's hourly
   limit on correlation checks. A pick it has asked about is not asked again for a day.
@@ -41,9 +44,9 @@ if TYPE_CHECKING:
 log = structlog.get_logger(__name__)
 
 TICK_SECONDS = 300.0
-CHECK_EVERY_SECONDS = 1800.0
+CHECK_EVERY_SECONDS = 1200.0
 #: Picks sent to BRAIN's check each round: BRAIN limits correlation checks per hour.
-CHECKS_PER_ROUND = 3
+CHECKS_PER_ROUND = 5
 #: How long a pick asked about is left alone before it may be asked again.
 RECHECK_SECONDS = 24 * 3600.0
 #: Tasks started in one round, so a burst of starts does not crowd the cores at once.
@@ -60,8 +63,15 @@ IDLE_TASK_DAYS = 14
 DAY_SECONDS = 24 * 3600.0
 #: Regions the template engine plans for, and how many tasks each gets per plan: USA and GLB
 #: for the challenge, ASI for the third Osmosis region.
-ENGINE_REGIONS = ("USA", "GLB", "ASI", "IND")
-ENGINE_TASKS_PER_REGION = 3
+ENGINE_REGIONS = ("USA", "GLB", "ASI", "IND", "EUR", "KOR", "GBR", "HKG", "AMR")
+ENGINE_TASKS_PER_REGION = 2
+#: Fewest seconds between two plans: a day behind pace gets several, never a flood.
+PLAN_EVERY_SECONDS = 3 * 3600.0
+#: How often near misses are handed to the Repair Engineer, and at most how many reworks a
+#: BRAIN day starts.
+REWORK_EVERY_SECONDS = 1800.0
+REWORKS_PER_DAY = 12
+REWORK_CORES = 2
 
 
 @dataclass(slots=True)
@@ -76,7 +86,8 @@ class Day:
     free_slots: int
     queued_tasks: int
     idle_tasks: int
-    planned_today: bool
+    #: A plan was written within :data:`PLAN_EVERY_SECONDS`.
+    planned_recently: bool
 
 
 @dataclass(slots=True)
@@ -136,7 +147,7 @@ def decide(day: Day, *, enabled: bool) -> Decision:
         d.start_tasks = min(STARTS_PER_TICK, day.idle_tasks)
         d.note = f"Starting {d.start_tasks} waiting task(s) to keep the quota moving."
         return d
-    if behind and not day.planned_today:
+    if behind and not day.planned_recently:
         d.plan_tasks = True
         d.note = "Behind pace with nothing waiting: asking the Strategist for tasks."
         return d
@@ -155,7 +166,9 @@ class DailyAutopilot:
         self._checks: set[asyncio.Task[Any]] = set()
         self._asked: dict[str, float] = {}
         self._last_check = 0.0
-        self._planned_day: str | None = None
+        self._planned_at = -PLAN_EVERY_SECONDS
+        self._last_rework = 0.0
+        self._reworks: tuple[str, int] = ("", 0)
         #: The last round, for the screen.
         self.last: dict[str, Any] = {}
 
@@ -208,7 +221,7 @@ class DailyAutopilot:
             free_slots=int(engine.get("slotsFree") or 0),
             queued_tasks=sum(1 for r in rows if r.status == StudyStatus.QUEUED),
             idle_tasks=sum(1 for r in rows if r.status == StudyStatus.IDLE),
-            planned_today=self._planned_day == day.isoformat(),
+            planned_recently=time.monotonic() - self._planned_at < PLAN_EVERY_SECONDS,
         )
 
     async def tick(self) -> Decision:
@@ -223,8 +236,10 @@ class DailyAutopilot:
         if decision.plan_tasks:
             await self._plan()
         checked: list[str] = []
+        reworked: list[str] = []
         if self.enabled and day.signed_in:
             checked = await self._check_picks()
+            reworked = await self._rework()
         self.last = {
             "at": utcnow().isoformat(),
             "enabled": self.enabled,
@@ -235,6 +250,7 @@ class DailyAutopilot:
             "note": decision.note,
             "started": started,
             "checked": checked,
+            "reworked": reworked,
             "alerts": [title for _, title, _ in decision.alerts],
         }
         self.bus.say("conductor", f"Autopilot: {decision.note}")
@@ -264,7 +280,7 @@ class DailyAutopilot:
         searches only if the engine finds nothing to try."""
         from ..labs import engine
 
-        self._planned_day = platform_midnight().date().isoformat()
+        self._planned_at = time.monotonic()
         added = 0
         for region in ENGINE_REGIONS:
             try:
@@ -310,6 +326,33 @@ class DailyAutopilot:
         self.bus.set_stat("selector", "ready to submit", ready)
         self.bus.say("selector", f"Today's Picks: {ready} ready, {len(picks.check)} to check.")
         return wanted
+
+    async def _rework(self) -> list[str]:
+        """Hand the strongest recent near misses to the Repair Engineer and start the task."""
+        now = time.monotonic()
+        if now - self._last_rework < REWORK_EVERY_SECONDS:
+            return []
+        self._last_rework = now
+        day = platform_midnight().date().isoformat()
+        if self._reworks[0] != day:
+            self._reworks = (day, 0)
+        if self._reworks[1] >= REWORKS_PER_DAY:
+            return []
+        from ..api.lab_tasks import requeue
+        from . import rework
+
+        found = await rework.candidates(self.state)
+        if not found:
+            return []
+        ids = [c.alpha_id for c in found]
+        added = await self.state.repair.add_task(len(ids), rework.PER_ALPHA, REWORK_CORES, ids)
+        if added is None:
+            return []
+        await requeue(self.state, [added.id])
+        self._reworks = (day, self._reworks[1] + 1)
+        self.bus.count("repair", "near misses reworked by the Autopilot", len(ids))
+        log.info("autopilot.reworked", task=added.id, alphas=ids)
+        return ids
 
 
 async def _quietly(awaitable: Any) -> None:

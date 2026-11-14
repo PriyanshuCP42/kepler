@@ -828,7 +828,10 @@ async def add_task(body: TemplateTask, state: State) -> AddedTask:
         raise refuse(422, "template_blocked", plan["problems"][0])
 
     run: TemplateParams = plan["run"]
-    per_round, size = body.cores * 10, body.simulations
+    # Never more simulations than the search holds: a task asked for more ran out of new
+    # points and redrew repeats, and while it waited on simulations BRAIN had lost it held the
+    # scheduler, so no task behind it ran.
+    per_round, size = body.cores * 10, min(body.simulations, template.combinations(run.space))
     _, covered = template.coverage(run.space)
     return await add_study(
         state,

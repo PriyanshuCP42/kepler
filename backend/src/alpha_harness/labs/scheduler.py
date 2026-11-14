@@ -8,6 +8,7 @@ only decides how one point of its search is drawn (its ``draw``).
 import asyncio
 import functools
 import json
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 import structlog
@@ -360,6 +361,32 @@ def ask_points(
     return picked, withdrawn
 
 
+#: How long a trial may stay open with nothing of its task out on BRAIN before it counts as
+#: lost. A dropped connection once left hundreds of trials open for good: the task could neither
+#: finish nor stop, and it held the scheduler.
+LOST_AFTER = timedelta(hours=2)
+LOST = "Lost: BRAIN never returned its simulation."
+
+
+async def close_lost(optimizer: Optimizer, study_id: int) -> int:
+    """Fail the task's open trials that are older than :data:`LOST_AFTER`. Called only when
+    nothing of the task is in flight, so none of them can still come back. Returns how many."""
+    async with optimizer.db.session() as session:
+        result = await session.execute(
+            update(Trial)
+            .where(
+                Trial.study_id == study_id,
+                Trial.state.in_([TrialState.QUEUED, TrialState.RUNNING]),
+                Trial.created_at < utcnow() - LOST_AFTER,
+            )
+            .values(state=TrialState.FAIL, message=LOST)
+        )
+    closed = int(result.rowcount or 0)  # pyright: ignore[reportAttributeAccessIssue]  # pyrefly: ignore[missing-attribute]
+    if closed:
+        log.warning("tasks.lost_trials_closed", study_id=study_id, closed=closed)
+    return closed
+
+
 async def advance(optimizer: Optimizer, study_id: int) -> int:
     """Refill the task's cores as its batches come back. Returns how many were queued.
 
@@ -399,6 +426,8 @@ async def advance(optimizer: Optimizer, study_id: int) -> int:
             )
         )
 
+    if open_count and not in_flight:
+        open_count -= await close_lost(optimizer, row.id)
     stopping = task_params(row).stopping
     waiting = bool(open_count)
     last_number = -1 if last is None else int(last)

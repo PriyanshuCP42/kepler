@@ -19,7 +19,7 @@ def _day(**over):
         "free_slots": 4,
         "queued_tasks": 0,
         "idle_tasks": 2,
-        "planned_today": False,
+        "planned_recently": False,
     }
     return Day(**(base | over))
 
@@ -43,7 +43,7 @@ def test_behind_pace_with_nothing_waiting_it_asks_the_strategist_once_a_day():
     behind = _day(idle_tasks=0, used=500, seconds_left=8 * HOUR)
     assert decide(behind, enabled=True).plan_tasks
     assert not decide(
-        _day(idle_tasks=0, used=500, seconds_left=8 * HOUR, planned_today=True), enabled=True
+        _day(idle_tasks=0, used=500, seconds_left=8 * HOUR, planned_recently=True), enabled=True
     ).plan_tasks
     # On pace: no need.
     assert not decide(_day(idle_tasks=0, used=3200, seconds_left=8 * HOUR), enabled=True).plan_tasks

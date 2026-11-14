@@ -137,3 +137,30 @@ def test_measured_results_outweigh_the_slide():
     rng = random.Random(0)
     firsts = [repair.choose(["LOW_FITNESS"], stats, 1, rng)[0][0].id for _ in range(400)]
     assert firsts.count("hump") > firsts.count("target_tvr_hump") * 5
+
+
+def test_a_little_over_the_production_ceiling_is_repairable_far_over_is_not():
+    def row(value):
+        checks = [{"name": "PROD_CORRELATION", "result": "FAIL", "value": value}]
+        return {"checks": json.dumps(checks)}
+
+    assert repair.failures(row(0.76), {}) == [repair.PROD]
+    assert repair.failures(row(0.85), {}) == []
+    picked = {m.id for m, _ in repair.choose([repair.PROD], {}, 30, random.Random(2))}
+    assert {"cluster_sector", "convex", "statistical_neutralization"} <= picked
+
+
+def test_the_moves_that_worked_write_what_worked():
+    expression, _ = repair.BY_ID["cluster_sector"].apply("rank(close)", BASE, OPTIONS)
+    assert "group_cartesian_product(sector, pv13_h_min2_3000_sector)" in expression
+    # A market without a known statistical cluster skips the move.
+    assert repair.BY_ID["cluster_sector"].apply("x", BASE | {"region": "JPN"}, OPTIONS) is None
+    expression, _ = repair.BY_ID["size_tilt"].apply("rank(close)", BASE, OPTIONS)
+    assert expression.endswith("alpha * (0.5 + rank(cap))")
+    _, traded = repair.BY_ID["max_trade"].apply("x", BASE, OPTIONS)
+    assert traded["maxTrade"] == "ON"
+    assert repair.BY_ID["max_trade"].apply("x", traded, OPTIONS) is None
+    # Every robust-universe failure BRAIN names reaches the size tilt.
+    for name in ("LOW_ROBUST_UNIVERSE_SHARPE.WITH_RATIO", "LOW_ROBUST_UNIVERSE_RETURNS"):
+        assert "size_tilt" in {m.id for m, _ in repair.choose([name], {}, 30, random.Random(3))}
+    assert repair.base_settings(BASE | {"max_trade": "ON"})["maxTrade"] == "ON"

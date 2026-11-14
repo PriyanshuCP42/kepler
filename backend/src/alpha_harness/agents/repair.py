@@ -208,10 +208,58 @@ def _breaker(recipe_id: str) -> Transform:
     return apply
 
 
+#: BRAIN's own Production Correlation check. Ignored elsewhere as a failure of the idea, it
+#: is repairable when only a little over the 0.7 ceiling: re-neutralizing a crowded alpha
+#: inside sector and statistical clusters has brought one back under it.
+PROD = "PROD_CORRELATION"
+#: Measured Production Correlation up to which a repair is still worth its simulations. Of
+#: the alphas measured over it, none came back under 0.7 whatever was done to them.
+REPAIRABLE_PROD = 0.8
+INVESTABILITY = "LOW_INVESTABILITY_CONSTRAINED_SHARPE"
+#: Sharpe inside one part of a regional market: Japan within ASI, a continent within GLB.
+_SUB_MARKET = frozenset(
+    {"LOW_ASI_JPN_SHARPE", "LOW_GLB_AMER_SHARPE", "LOW_GLB_EMEA_SHARPE", "LOW_GLB_APAC_SHARPE"}
+)
+
 _TURNOVER = frozenset({"HIGH_TURNOVER", COST})
-_ROBUST = frozenset({"LOW_SUB_UNIVERSE_SHARPE", "LOW_ROBUST_UNIVERSE_SHARPE"})
+_ROBUST = frozenset(
+    {
+        "LOW_SUB_UNIVERSE_SHARPE",
+        "LOW_ROBUST_UNIVERSE_SHARPE",
+        "LOW_ROBUST_UNIVERSE_SHARPE.WITH_RATIO",
+        "LOW_ROBUST_UNIVERSE_RETURNS",
+    }
+)
 _WEAK = frozenset({"LOW_SHARPE", "LOW_FITNESS", "LOW_2Y_SHARPE", "IS_LADDER_SHARPE", DECAY})
-_CROWDED = frozenset({POOL, "SELF_CORRELATION"})
+_CROWDED = frozenset({POOL, "SELF_CORRELATION", PROD})
+
+#: Each market's statistical cluster grouping, the second half of the sector-and-cluster
+#: neutralization that repaired a crowded alpha. A market missing here skips that move.
+CLUSTERS = {
+    "USA": "pv13_h_min2_3000_sector",
+    "GLB": "sta1_allc20",
+    "EUR": "sta1_allc20",
+    "ASI": "sta1_allxjp_513_c20",
+    "IND": "sta1_allxjp_513_c20",
+    "KOR": "sta1_allxjp_513_c20",
+    "HKG": "sta1_allxjp_513_c20",
+    "GBR": "sta1_top1200c20",
+    "DEU": "sta1_top1200c20",
+}
+
+
+def _cluster_sector(expression: str, settings: Settings, _: Options) -> tuple[str, Settings] | None:
+    field = CLUSTERS.get(str(settings.get("region") or ""))
+    if field is None:
+        return None
+    return _wrap(f"group_neutralize(alpha, densify(group_cartesian_product(sector, {field})))")(
+        expression, settings, _
+    )
+
+
+def _max_trade(settings: Settings, _: Options) -> Settings | None:
+    return None if settings.get("maxTrade") == "ON" else settings | {"maxTrade": "ON"}
+
 
 MOVES: tuple[Move, ...] = (
     Move(
@@ -338,6 +386,49 @@ MOVES: tuple[Move, ...] = (
         _CROWDED | {DECAY},
         _breaker("fast_innovation"),
     ),
+    # The moves below each turned a near miss into a submission on this account in November
+    # 2026; their priors say so, and what Kepler measures from here takes over.
+    Move(
+        "cluster_sector",
+        "Neutralize inside sector and statistical clusters",
+        _CROWDED,
+        _cluster_sector,
+        (4, 2),
+    ),
+    Move(
+        "size_tilt",
+        "Lean towards larger companies",
+        _ROBUST,
+        _wrap("alpha * (0.5 + rank(cap))"),
+        (4, 2),
+    ),
+    Move(
+        "liquid_volume_tilt",
+        "Lean gently towards liquid stocks",
+        _ROBUST,
+        _wrap("alpha * (0.5 + rank(adv20))"),
+    ),
+    Move(
+        "volatility_tilt",
+        "Lean towards the more volatile stocks of each industry",
+        frozenset({COST, "LOW_FITNESS", "LOW_RETURNS"}),
+        _wrap("alpha * group_rank(ts_std_dev(returns, 20), industry)"),
+        (4, 2),
+    ),
+    Move(
+        "convex",
+        "Weight the extremes",
+        _CROWDED | {COST, "LOW_FITNESS"},
+        _wrap("signed_power(rank(alpha) - 0.5, 2)"),
+        (4, 2),
+    ),
+    Move("max_trade", "Turn Max Trade on", frozenset({INVESTABILITY}), setting_move(_max_trade)),
+    Move(
+        "country_books",
+        "Balance the book inside every country",
+        _SUB_MARKET,
+        _wrap("group_neutralize(alpha, country)"),
+    ),
 )
 BY_ID = {move.id: move for move in MOVES}
 
@@ -350,6 +441,15 @@ def failures(row: dict[str, Any], gates: dict[str, Any]) -> list[str]:
         if str(c.get("name", "")).upper() not in IGNORED_CHECKS
         and str(c.get("result", "")).upper() in REFUSING
     ]
+    for check in checks_of(row.get("checks")):
+        value = check.get("value")
+        if (
+            str(check.get("name", "")).upper() == PROD
+            and str(check.get("result", "")).upper() == "FAIL"
+            and isinstance(value, int | float)
+            and value <= REPAIRABLE_PROD
+        ):
+            found.append(PROD)
     for gate, name in (("decay", DECAY), ("cost", COST), ("pool", POOL)):
         if (gates.get(gate) or {}).get("ok") is False:
             found.append(name)
@@ -398,7 +498,7 @@ def base_settings(row: dict[str, Any]) -> Settings:
         "truncation": float(row["truncation"] or 0.08),
         "testPeriod": TEST_PERIOD,
         "simulationMode": FULL_MODE,
-    }
+    } | ({"maxTrade": "ON"} if str(row.get("max_trade") or "").upper() == "ON" else {})
 
 
 def options_for(schema: dict[str, Any], base: Settings) -> Options:
@@ -489,6 +589,7 @@ class RepairEngineer:
         ``ids`` names the alphas to fix instead: the Submission Desk's candidates that BRAIN's
         submission check refused, whatever the Critic made of them.
         """
+        ids_given = ids
         # Read past ``limit``: crowded near misses are passed over below.
         ids = (ids if ids is not None else await self.waiting())[: limit * CROWD_LOOKAHEAD]
         if not ids:
@@ -507,7 +608,7 @@ class RepairEngineer:
         placeholders = ", ".join("?" for _ in ids)
         rows = await self.state.alphas.catalog.query(
             "SELECT alpha_id, expression, region, delay, universe, neutralization, decay, "  # noqa: S608
-            f"truncation, checks FROM alpha WHERE alpha_id IN ({placeholders})",
+            f"truncation, max_trade, checks FROM alpha WHERE alpha_id IN ({placeholders})",
             ids,
         )
         schema = await self.state.metadata.cached_settings_schema() or {}
@@ -516,12 +617,16 @@ class RepairEngineer:
         crowding = getattr(self.state, "crowding", None)
         if crowding is not None:
             known = await crowding.measured([str(r["alpha_id"]) for r in rows])
+            # A little over the ceiling is repairable; only a measured crowd past
+            # REPAIRABLE_PROD, or a guess from its datasets, rules an alpha out.
             rows = [
                 r
                 for r in rows
-                if not await crowding.too_crowded(
-                    r.get("expression"), known.get(str(r["alpha_id"]))
+                if (
+                    (measured := known.get(str(r["alpha_id"]))) is not None
+                    and measured <= REPAIRABLE_PROD
                 )
+                or (measured is None and not await crowding.too_crowded(r.get("expression"), None))
             ]
         rows = sorted(rows, key=lambda r: ids.index(str(r["alpha_id"])))[:limit]
         repairs: list[Repair] = []
@@ -529,9 +634,10 @@ class RepairEngineer:
         for row in sorted(rows, key=lambda r: ids.index(str(r["alpha_id"]))):
             expression = row.get("expression")
             verdict = verdicts.get(str(row["alpha_id"]))
-            if not expression or verdict is None:
+            # Named alphas are BRAIN's own refusals and need no Critic verdict to be read.
+            if not expression or (verdict is None and ids_given is None):
                 continue
-            failed = failures(row, verdict.gates or {})
+            failed = failures(row, (verdict.gates if verdict else None) or {})
             if not failed:
                 continue
             base = base_settings(row)

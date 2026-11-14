@@ -46,10 +46,12 @@ def test_a_recipe_that_never_passes_is_retired_and_skipped():
     record = engine.Record(tries=engine.RETIRE_TRIES, passes=0)
     assert record.retired and not engine.Record(tries=engine.RETIRE_TRIES, passes=1).retired
     c = Candidate("news_a", "news", Shape.SURPRISE, ["f1"], priority=5.0)
-    learned = {("surprise-drift", "surprise", "USA"): record}
-    # Surprise has one recipe; retired in USA, nothing is chosen there, but GLB still is.
+    learned = {(r.key, "surprise", "USA"): record for r in recipes.for_shape(Shape.SURPRISE)}
+    # Every surprise recipe retired in USA: nothing is chosen there, but GLB still is.
     assert engine.choose([c], learned, "USA", 3, random.Random(1)) == []
-    assert engine.choose([c], learned, "GLB", 3, random.Random(1))[0].recipe.key == "surprise-drift"
+    assert engine.choose([c], learned, "GLB", 3, random.Random(1))[0].recipe.key in {
+        r.key for r in recipes.for_shape(Shape.SURPRISE)
+    }
 
 
 def test_recipes_that_work_are_chosen_more_often():
@@ -77,8 +79,7 @@ def test_one_search_per_dataset_most_valuable_first():
 def test_a_choice_becomes_a_task_with_its_regions_rules():
     c = Candidate("mmp_nlp_sentiment", "other", Shape.COUNT, ["count_x", "count_y"], priority=1.0)
     task = engine.task_for(engine.Choice(c, recipes.BY_KEY["own-history-neutral"], 1.0), "ASI")
-    # MINVOL10M: the universe of BRAIN's 2x ASI D1 theme.
-    assert task.region == "ASI" and task.universes == ["MINVOL10M"]
+    assert task.region == "ASI" and task.universes == ["MINVOL1M"]
     assert task.investability == ["max_trade"]  # ASI's investability rule
     assert task.neutralizations == ["STATISTICAL", "SLOW"]
     assert task.variables["f"].filter.field_ids == ["count_x", "count_y"]

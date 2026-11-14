@@ -221,6 +221,40 @@ RECIPES: tuple[Recipe, ...] = (
         ),
         regions=frozenset({"GLB"}),
     ),
+    Recipe(
+        key="volume-confirmed-peer-rank",
+        title="Peer rank, scaled up on active trading days",
+        shapes=frozenset(
+            {Shape.COUNT, Shape.LEVEL, Shape.ESTIMATE, Shape.PROBABILITY, Shape.SURPRISE}
+        ),
+        template="$s * (group_rank(ts_backfill($f, 21), $g) - 0.5) * ts_rank(volume, $w)",
+        values={"s": "1, -1", "g": "sector, industry", "w": "21, 63"},
+        decay=6,
+        idea=(
+            "Long the top half of each group, short the bottom half, and more so on days the "
+            "stock trades more than usual, when the market is repricing it. The structure of "
+            "the first two submissions the template engine's searches led to."
+        ),
+    ),
+    Recipe(
+        key="glb-volume-confirmed-peer-rank",
+        title="Same-country industry rank, scaled up on active trading days",
+        shapes=frozenset(
+            {Shape.COUNT, Shape.LEVEL, Shape.ESTIMATE, Shape.PROBABILITY, Shape.SURPRISE}
+        ),
+        template=(
+            "$s * (group_rank(ts_backfill($f, 21), "
+            "densify(group_cartesian_product(country, industry))) - 0.5) * ts_rank(volume, $w)"
+        ),
+        values={"s": "1, -1", "w": "21, 63"},
+        decay=8,
+        idea=(
+            "The volume-confirmed peer rank, with peers drawn from the stock's own country so "
+            "every continent has its own long and short book, which the GLB Power Pool theme's "
+            "Americas Sharpe asks for. Seven operators keep it inside Power Pool's limits."
+        ),
+        regions=frozenset({"GLB"}),
+    ),
 )
 
 BY_KEY = {r.key: r for r in RECIPES}
@@ -242,8 +276,8 @@ class Market:
 
 #: Each region's rules, learned on this account and from the Playbook:
 #: - USA: TOP3000 with STATISTICAL kept production correlation lowest.
-#: - ASI: MINVOL10M, the universe of BRAIN's 2x ASI D1 theme (``asi-d1-minvol10m-theme``),
-#:   with Max Trade on, since its news Alphas otherwise failed BRAIN's investability check.
+#: - ASI: MINVOL1M with Max Trade on, since its news Alphas otherwise failed BRAIN's
+#:   investability check. The 2x theme's MINVOL10M held signals at half the Sharpe here.
 #: - EUR: its theme asks for CROWDING or SLOW_AND_FAST.
 #: - IND: TOP500, where a hedge-fund holdings family reached Sharpe 3.5; the fourth Osmosis
 #:   region (``third-osmosis-region``).
@@ -251,10 +285,14 @@ class Market:
 MARKETS: dict[str, Market] = {
     "USA": Market(universes=("TOP3000",), truncation=0.08),
     "GLB": Market(universes=("TOP3000",)),
-    "ASI": Market(universes=("MINVOL10M",), investability=("max_trade",)),
+    "ASI": Market(universes=("MINVOL1M",), investability=("max_trade",)),
     "EUR": Market(universes=("TOP2500",), neutralizations=("CROWDING", "SLOW_AND_FAST")),
     "IND": Market(universes=("TOP500",)),
     "KOR": Market(universes=("TOP600",)),
+    "GBR": Market(universes=("TOP700",)),
+    "HKG": Market(universes=("TOP800",)),
+    # AMR offers no SLOW neutralization.
+    "AMR": Market(universes=("TOP600",), neutralizations=("STATISTICAL", "INDUSTRY")),
 }
 
 
